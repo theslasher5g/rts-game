@@ -1038,7 +1038,7 @@ export class UnitRenderer {
     group.add(this.barMesh);
 
     // Auswahlringe
-    this.ringGeom = new THREE.RingGeometry(0.82, 1.0, 40, 1);
+    this.ringGeom = new THREE.RingGeometry(0.9, 1.0, 40, 1);
     this.ringGeom.rotateX(-Math.PI / 2);
     this.ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false, fog: false });
     this.ringMesh = this.makeRingMesh(32);
@@ -1166,7 +1166,7 @@ export class UnitRenderer {
 
       if (u.selected) {
         // Ring
-        const rr = this.counterMode ? COUNTER_PX * 0.62 * this.pxKm : Math.max(radius * 0.65, 14 * this.pxKm);
+        const rr = this.counterMode ? COUNTER_PX * 0.62 * this.pxKm : Math.min(Math.max(radius * 0.45, 12 * this.pxKm), 30 * this.pxKm);
         _p.set(u.x, ground + 0.001 * dist, u.z);
         _s.set(rr, 1, rr);
         _m.compose(_p, _q.identity(), _s);

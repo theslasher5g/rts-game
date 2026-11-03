@@ -3,8 +3,8 @@
 Browserbasiertes 3D-Echtzeit-Strategiespiel: Grand Strategy (Wirtschaft, Handel, Politik) trifft taktisches RTS
 im Retro-Look der PS2-Ära. Läuft komplett im Browser, ohne Installation.
 
-> **Stand: Phase 1 – Grundgerüst.** 3D-Karte Europas mit echten Grenzen und Höhendaten, isometrische RTS-Kamera
-> mit stufenlosem Zoom, Länderauswahl mit Startwerten, PS2-Look-Shader.
+> **Stand: Phase 2 – Straßennetz & Einheiten.** Zusätzlich zu Phase 1 (3D-Karte, Kamera, Länderauswahl, PS2-Look):
+> Straßen-, Schienen- und Fährnetz als Navigationsgraph, 28 Einheitentypen, Auswahl, Formationen und Befehle.
 
 ## Schnellstart
 
@@ -48,7 +48,25 @@ npm run geodata
 | Nordausrichtung | `R` oder `Pos1` |
 | Land auswählen | Linksklick auf die Karte oder in der Länderliste |
 | Heranfliegen | Doppelklick auf die Karte, Klick auf die Minikarte |
-| Spielgeschwindigkeit | `Leertaste` = Pause, `1`–`5` = Tempo |
+| Zeitraffer | `Leertaste` = Pause, `+` / `-` = Tempo (×10 bis ×7200) |
+
+### Einheiten (Phase 2)
+
+Tasten sind für deutsche QWERTZ-Tastaturen beschriftet. WASD bleibt der Kamera vorbehalten.
+
+| Aktion | Eingabe |
+| --- | --- |
+| Einheit auswählen | Linksklick; `Shift` fügt hinzu; Doppelklick wählt alle gleichen Typs im Bild |
+| Rahmenauswahl | Linke Maustaste ziehen |
+| Bewegen | Rechtsklick; `Shift` + Rechtsklick hängt Wegpunkt an |
+| Blickrichtung und Formationsbreite | Rechte Maustaste ziehen (mit Auswahl; ohne Auswahl verschiebt es die Karte) |
+| Angriffsbewegung / Rückwärts / Patrouille | `G` / `V` / `B`, dann Linksklick (oder `Strg` + Rechtsklick für Angriffsbewegung) |
+| Stopp / Halten | `T` / `Y` |
+| Formation wechseln | `F` (Linie, Kolonne, Keil, Verteilt) |
+| Kontrollgruppen | `Strg`+`1`–`9` belegen, `1`–`9` abrufen (doppelt = Kamera hin), `Shift`+`1`–`9` hinzufügen |
+| Alle im Bild | `Strg`+`A` |
+| Auswahl aufheben | `Esc` |
+| Einheit zum Testen erzeugen | Button „+ Einheit“ im Befehlspanel, dann auf die Karte klicken |
 
 ## Was Phase 1 enthält
 
@@ -68,10 +86,23 @@ npm run geodata
 - **HUD:** Ressourcenleiste, Datum und Spieltempo, Minikarte, Länder-Infopanel und Platzhalter-Reiter
   für die folgenden Phasen.
 
+## Was Phase 2 enthält
+
+- **Straßennetz:** Natural-Earth-Straßen (1:10m) und Bahnstrecken, zu einem Graphen mit rund 26.000 Knoten und
+  33.000 Kanten verbunden. Brücken sind eigene Kanten (Vorbereitung für das Sprengen in Phase 3). OpenStreetMap ist aus der
+  Entwicklungsumgebung nicht erreichbar; ein OSM-Import kann später ergänzt werden. Neu erzeugen: `npm run roads`.
+- **Wegfindung:** Straße, Gelände (Hangneigung bremst, Flüsse blockieren) und See, mit Fähren. Schwere Fahrzeuge sind
+  auf Straßen deutlich schneller. Typische Routen dauern unter 5 ms.
+- **Einheiten:** 28 Typen (Infanterie, Panzer, Artillerie, Flugabwehr, Hubschrauber, Jets, Drohnen, Schiffe) mit eigenen
+  Low-Poly-Modellen. Aus der Ferne erscheinen NATO-Symbole (blau = eigene und verbündete, rot = feindlich, grün = neutral).
+- **Verbände:** Formationen, Verbandsgeschwindigkeit = langsamste Einheit, Wegpunkte, Patrouille.
+- **Zeitraffer:** Stufe 1 entspricht 10-facher Echtzeit, damit die Einheiten taktisch steuerbar bleiben.
+
 ## Projektstruktur
 
 ```
 scripts/build-geodata.mjs   Geodaten-Pipeline (Download, Projektion, Rasterisierung)
+scripts/build-roads.mjs     Straßen-/Schienengraph aus Natural Earth
 public/data/                vorverarbeitete Karten-Assets (heights.png, countries.png, meta.json)
 src/
   main.ts                   Bootstrap, Event-Verdrahtung, Game-Loop
@@ -79,6 +110,9 @@ src/
   world/                    GeoData, Terrain (LOD), Wasser, Städte, Picking
   render/                   Renderer + PS2-Post-Processing
   camera/                   RTS-Kamera
+  nav/                      Straßengraph, Wegfindung, Straßen-Rendering
+  units/                    Einheitentypen, Simulation, Modelle und NATO-Symbole
+  control/                  Auswahl, Befehle, Kontrollgruppen
   game/                     Spielzustand, Länder-Startprofile
   ui/                       Hauptmenü, HUD, Minikarte, Labels, Einstellungen
 ```
@@ -90,7 +124,7 @@ server-autoritativ (Multiplayer) angebunden werden können.
 ## Roadmap
 
 1. ✅ Grundgerüst: Karte, Kamera, Länderauswahl, PS2-Shader
-2. Straßennetz (OSM) als Navigationsgraph, Einheiten, Auswahl, Formationen
+2. ✅ Straßennetz als Navigationsgraph, Einheiten, Auswahl, Formationen
 3. Kampfsystem, Effekte, Deckung, Gebäude, Gräben, Brücken sprengen
 4. Zivilisten und Schutzstatus
 5. Ressourcen, Zufriedenheit, Logistik, Produktion

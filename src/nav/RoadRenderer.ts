@@ -35,7 +35,7 @@ const STYLES: Record<string, ClassStyle> = {
   road: { color: 0xa9a58f, px: 1.1, minKm: 0.07, maxY: 420, lift: 0.0 },
   track: { color: 0x8a7f66, px: 1.0, minKm: 0.05, maxY: 180, lift: 0.0, dash: 0.6 },
   rail: { color: 0x2c2a2a, px: 1.3, minKm: 0.08, maxY: 1400, lift: 0.002, dash: 0.5 },
-  ferry: { color: 0x9fd0e8, px: 1.4, minKm: 0.12, maxY: 3000, lift: 0.0, dash: 5 },
+  ferry: { color: 0x9fd0e8, px: 1.4, minKm: 0.12, maxY: 1500, lift: 0.0, dash: 5 },
   bridge: { color: 0xf0e2b0, px: 2.2, minKm: 0.18, maxY: 1100, lift: 0.004 },
 };
 
