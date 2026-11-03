@@ -237,9 +237,17 @@ export class UnitManager {
     return u;
   }
 
+  /** Phase 3: während update() angefordertes Entfernen wird bis nach der Schleife verschoben (iterationssicher). */
+  private updating = false;
+  private readonly pendingRemoval: number[] = [];
+
   remove(id: number): void {
     const u = this.byId.get(id);
     if (!u) return;
+    if (this.updating) {
+      if (!this.pendingRemoval.includes(id)) this.pendingRemoval.push(id);
+      return;
+    }
     const i = this.units.indexOf(u);
     if (i >= 0) this.units.splice(i, 1);
     this.byId.delete(id);
@@ -481,11 +489,17 @@ export class UnitManager {
   update(dtHours: number): void {
     this.processRouteQueue();
     const dt = dtHours > 0 ? dtHours : 0;
+    this.updating = true;
     for (let i = 0; i < this.units.length; i++) {
       const u = this.units[i];
       const m = this.motion.get(u.id)!;
       if (dt > 0) this.step(u, m, dt);
       this.updateY(u, m);
+    }
+    this.updating = false;
+    if (this.pendingRemoval.length) {
+      const ids = this.pendingRemoval.splice(0);
+      for (const id of ids) this.remove(id);
     }
     this.rebuildHash();
   }
@@ -580,6 +594,17 @@ export class UnitManager {
       const target = u.airborne ? ALTITUDE[u.type.model] ?? 0.3 : 0;
       const rate = (CLIMB_RATE[cat] ?? 20) * dt;
       m.alt = m.alt < target ? Math.min(target, m.alt + rate) : Math.max(target, m.alt - rate);
+    }
+
+    // Phase 3 (CombatSystem): 'fireAt' = Feuermission am Standort; attackMove/attack halten an, solange u.engaged
+    // (Flächenflugzeuge und Drohnen bleiben in Bewegung, Hubschrauber schweben).
+    if (u.orders.length) {
+      const k0 = u.orders[0].kind;
+      const mustHold = (!isAir || cat === 'helicopter') && (k0 === 'fireAt' || (u.engaged === true && (k0 === 'attackMove' || k0 === 'attack')));
+      if (mustHold) {
+        u.speedKmh = Math.max(0, u.speedKmh - DECEL * dt);
+        return;
+      }
     }
 
     if (!u.orders.length) {

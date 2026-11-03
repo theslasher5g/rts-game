@@ -114,8 +114,22 @@ export interface Unit {
   wounded?: number;
   /** Strukturbau-Auftrag (Pioniere): StructureInfo.id */
   buildingStructureId?: number;
-  /** Feuer-/Gefechtsstatus für Anzeige */
+  /** Feuer-/Gefechtsstatus für Anzeige (CombatSystem: hat gültiges Ziel in Reichweite / hat vor <2 s gefeuert). Hält attackMove/attack-Befehle an. */
   engaged?: boolean;
+  /**
+   * Phase 3 (CombatSystem): Anzahl noch kampffähiger Modelle/Soldaten (1..type.memberCount), proportional zu hp/type.hp.
+   * UnitRenderer darf damit überzählige Modelle ausblenden; undefined = alle.
+   */
+  membersAlive?: number;
+  // --- Phase 3 Taktik (InfantryAI)
+  /**
+   * true = Einheit ist festgenagelt/in Überwachungsphase: der UnitManager darf sie NICHT vorrücken lassen
+   * (Geschwindigkeit -> 0, Befehle/Route bleiben erhalten). Gesetzt von InfantryAI, gelesen vom UnitManager/CombatSystem
+   * (CombatSystem: Feuer nur als Gegenfeuer mit Malus).
+   */
+  pinned?: boolean;
+  /** Verbleibende Sprungzeit (s) eines Vault-Sprungs, 0.6 -> 0 (InfantryAI setzt, UnitRenderer zeichnet Hüpfer) */
+  vaultT?: number;
 }
 
 export type UnitStance = 'free' | 'hold';

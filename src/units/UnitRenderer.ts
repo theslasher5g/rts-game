@@ -892,6 +892,8 @@ interface UnitVis {
   roll: number;
   lastHeading: number;
   seen: number;
+  /** Phase 3: weiche Haltung der Infanterie 0 = stehen, 1 = kauern, 2 = liegen */
+  post: number;
 }
 
 const _m = new THREE.Matrix4();
@@ -906,6 +908,7 @@ const _cam = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
 const _frustum = new THREE.Frustum();
 const _pv = new THREE.Matrix4();
+const _xAxis = new THREE.Vector3(1, 0, 0);
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _tmpOff = new Float32Array(64);
 const _ringColor = new THREE.Color();
@@ -1229,11 +1232,15 @@ export class UnitRenderer {
 
   /** Mitglieder eines Verbands in die Instanzpuffer schreiben */
   private drawUnit(u: Unit, def: ModelDef, uy: number, s: number, dt: number, smooth: number, time: number): void {
+    // Phase 3: besetzte Gebäude -> unsichtbar
+    if (u.garrisonId) return;
     const slot = this.slots.get(u.type.model)!;
-    const n = Math.min(u.type.memberCount, 32);
+    // Phase 3: gefallene Soldaten nicht zeichnen (membersAlive, falls vom CombatSystem gesetzt)
+    const nAll = Math.min(u.type.memberCount, 32);
+    const n = Math.max(0, Math.min(nAll, Math.ceil(u.membersAlive ?? nAll)));
     let v = this.vis.get(u.id);
     if (!v) {
-      v = { off: new Float32Array(n * 2), init: false, pitch: 0, roll: 0, lastHeading: u.heading, seen: 0 };
+      v = { off: new Float32Array(nAll * 2), init: false, pitch: 0, roll: 0, lastHeading: u.heading, seen: 0, post: 0 };
       this.vis.set(u.id, v);
     }
     v.seen = this.frameNo;
@@ -1242,6 +1249,9 @@ export class UnitRenderer {
     const moving = u.speedKmh > 0.5;
     const cat = u.type.category;
 
+    // Phase 3: Deckungslinie (nur Infanterie, stehend)
+    const coverLine = cat === 'infantry' && !!u.coverId && u.coverDirX !== undefined && u.coverDirZ !== undefined;
+    const cdx = u.coverDirX ?? 0, cdz = u.coverDirZ ?? 0;
     // --- Ziel-Layout (m, lokal: x rechts, z nach hinten)
     const t = _tmpOff;
     for (let i = 0; i < n; i++) {
@@ -1258,6 +1268,17 @@ export class UnitRenderer {
         }
       } else if (domain === 'naval') {
         oz = i * sp * 1.4;
+      } else if (coverLine && !moving) {
+        // Phase 3: Mitglieder in Reihe entlang der Deckungslinie (quer zur Schutzrichtung), 2. Reihe leicht dahinter
+        const perRow = Math.max(1, Math.min(n, 5));
+        const row = Math.floor(i / perRow), col = i % perRow;
+        const inRow = Math.min(perRow, n - row * perRow);
+        const lat = (col - (inRow - 1) / 2) * sp * (u.posture === 'prone' ? 1.1 : 0.95);
+        const back = row * sp * 0.9;
+        // Welt-Vektoren (lat = (-dirZ, dirX), zurück = -dir) in lokale Koordinaten (rechts = (ch,sh), hinten = (-sh,ch))
+        const wx = -cdz * lat - cdx * back, wz = cdx * lat - cdz * back;
+        ox = wx * Math.cos(u.heading) + wz * Math.sin(u.heading);
+        oz = -wx * Math.sin(u.heading) + wz * Math.cos(u.heading);
       } else if (moving && u.onRoad) {
         oz = i * sp * 1.25; // Kolonne
       } else if (moving) {
@@ -1309,6 +1330,23 @@ export class UnitRenderer {
     const tc = slot.team.array as Float32Array;
     const scale = ws * def.boost;
     const isGround = domain === 'ground';
+    // Phase 3: Haltung (Soldaten): stehen / kauern (~0.65 Höhe, vorgebeugt) / liegen (flach, nach vorn gekippt).
+    // Bewegte Einheiten stehen immer (außer festgenagelt/Sprung).
+    let postT = 0;
+    if (cat === 'infantry' || u.type.model === 'soldier') {
+      const pst = u.posture ?? 'stand';
+      postT = moving && !u.pinned ? 0 : pst === 'prone' ? 2 : pst === 'crouch' ? 1 : 0;
+    }
+    v.post += (postT - v.post) * smooth;
+    const pz = v.post;
+    const lean = pz <= 1 ? pz * 0.3 : 0.3 + (pz - 1) * 1.15; // rad nach vorn (Kopf Richtung -z)
+    const sy = pz <= 1 ? 1 - pz * 0.32 : 0.68 + (pz - 1) * 0.22; // Höhenskala
+    const sz = pz > 1 ? 1 + (pz - 1) * 0.15 : 1; // liegend etwas gestreckt
+    // Vault: kleiner Hüpfer (0.6 s)
+    const vt = u.vaultT ?? 0;
+    const hop = vt > 0 ? Math.sin(Math.PI * (1 - vt / 0.6)) * 0.9 * ws : 0;
+    // In Deckung (stehend) schauen die Soldaten zur Bedrohung (= Schutzrichtung der Deckung)
+    const coverYaw = coverLine && !moving ? Math.atan2(cdx, -cdz) : NaN;
     const airborne = !!u.airborne;
     for (let i = 0; i < n; i++) {
       if (slot.count >= slot.cap) break;
@@ -1319,10 +1357,17 @@ export class UnitRenderer {
       let wy = uy;
       if (isGround) wy = Math.max(0, this.geo.heightAt(wx, wz)) * this.exag;
       const yawJ = !moving && isGround ? jit(u.id, i, 5) * (cat === 'infantry' ? 1.2 : 0.25) : 0;
-      _e.set(v.pitch, -h + yawJ, v.roll);
+      const yawBase = coverYaw === coverYaw ? coverYaw : h;
+      _e.set(v.pitch, -yawBase + yawJ, v.roll);
       _q.setFromEuler(_e);
-      _p.set(wx, wy, wz);
-      _s.setScalar(scale);
+      if (lean > 0.001) {
+        // Haltung: Kippung um die lokale X-Achse (nach dem Gieren)
+        _q2.setFromAxisAngle(_xAxis, -lean);
+        _q.multiply(_q2);
+      }
+      _p.set(wx, wy + hop, wz);
+      if (pz > 0.001) _s.set(scale, scale * sy, scale * sz);
+      else _s.setScalar(scale);
       _m.compose(_p, _q, _s);
       const k = slot.count;
       slot.mesh.setMatrixAt(k, _m);
