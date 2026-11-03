@@ -20,6 +20,7 @@ const CONTROLS: Control[] = [
   { kind: 'bool', key: 'edgeScroll', label: 'Randscrollen', desc: 'Kamera am Bildschirmrand bewegen' },
   { kind: 'bool', key: 'showLabels', label: 'Ländernamen', desc: 'Beschriftungen auf der Karte' },
   { kind: 'bool', key: 'showCities', label: 'Städte', desc: 'Städte und Hauptstädte anzeigen' },
+  { kind: 'bool', key: 'showRoads', label: 'Straßen & Schienen', desc: 'Straßen-, Schienen- und Fährnetz anzeigen' },
 ];
 
 /** Lädt gespeicherte Einstellungen (localStorage) über DEFAULT_SETTINGS. */

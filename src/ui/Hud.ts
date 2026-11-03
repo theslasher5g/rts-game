@@ -87,7 +87,7 @@ export class Hud {
     const labels = SPEED_LABELS;
     labels.forEach((l, i) => {
       const b = button(l, 'btn');
-      b.title = i === 0 ? 'Pause (Leertaste)' : `Geschwindigkeit ${i} (Taste ${i})`;
+      b.title = i === 0 ? 'Pause (Leertaste)' : `Zeitraffer ${SPEED_LABELS[i]} (Tasten + / −)`;
       b.addEventListener('click', () => this.setSpeed(i));
       speeds.appendChild(b);
       this.speedBtns.push(b);
@@ -191,6 +191,9 @@ export class Hud {
     this.isVisible = false;
   }
 
+  /** Liefert true, wenn Esc anderweitig verbraucht wird (z. B. Einheitenauswahl aktiv) */
+  escapeGuard: (() => boolean) | null = null;
+
   setHoverInfo(id: number): void {
     if (id === this.hoverId) return;
     this.hoverId = id;
@@ -274,6 +277,8 @@ export class Hud {
     if (SettingsPanel.instance?.opened) return;
     const paused = !this.pauseBackdrop.classList.contains('hidden');
     if (e.key === 'Escape') {
+      // Phase 2: Esc hebt zuerst eine Einheitenauswahl auf (SelectionController), erst dann Pausemenü
+      if (!paused && !this.openTab && this.escapeGuard?.()) return;
       e.preventDefault();
       if (paused) this.closePause();
       else if (this.openTab) this.toggleTab(null);
@@ -286,9 +291,13 @@ export class Hud {
       this.setSpeed(this.state.speed === 0 ? this.lastSpeed : 0);
       return;
     }
-    if (e.key >= '1' && e.key <= '5' && e.key.length === 1) {
+    // Phase 2: Ziffern gehören den Kontrollgruppen – Tempo über +/- bzw. Numpad +/-
+    if (e.key === '+' || e.code === 'NumpadAdd') {
       e.preventDefault();
-      this.setSpeed(Number(e.key));
+      this.setSpeed(Math.min(5, Math.max(1, this.state.speed + 1)));
+    } else if (e.key === '-' || e.code === 'NumpadSubtract') {
+      e.preventDefault();
+      if (this.state.speed > 1) this.setSpeed(this.state.speed - 1);
     }
   }
 
