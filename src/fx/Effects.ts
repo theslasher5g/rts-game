@@ -598,8 +598,8 @@ const W: Record<WeaponKind, WeaponFx> = {
   atgm: { muzzle: 1.6, puff: 1.8, tracer: 0, proj: 2, trail: 1.1, dust: 0 },
   rpg: { muzzle: 1.4, puff: 2.5, tracer: 0, proj: 2, trail: 0.9, dust: 0 },
   mortar: { muzzle: 1.8, puff: 2.5, tracer: 0, proj: 3, trail: 0, dust: 2 },
-  howitzer: { muzzle: 5, puff: 5, tracer: 0, proj: 3, trail: 0, dust: 6 },
-  rocket_arty: { muzzle: 4.5, puff: 6, tracer: 0, proj: 3, trail: 1.8, dust: 7 },
+  howitzer: { muzzle: 5, puff: 3.5, tracer: 0, proj: 3, trail: 0, dust: 4 },
+  rocket_arty: { muzzle: 4.5, puff: 4, tracer: 0, proj: 3, trail: 1.8, dust: 4.5 },
   sam: { muzzle: 2.0, puff: 4, tracer: 0, proj: 2, trail: 1.5, dust: 3 },
   flak: { muzzle: 1.8, puff: 1.2, tracer: 2.5, proj: 0, trail: 0, dust: 0 },
   heli_gun: { muzzle: 1.0, puff: 0, tracer: 2, proj: 0, trail: 0, dust: 0 },
@@ -999,7 +999,7 @@ export class Effects {
           n = Math.floor(e.acc); e.acc -= n;
           for (let j = 0; j < n; j++) {
             const a = rnd() * 6.283, d = Math.sqrt(rnd()) * e.rad;
-            this.smokeP(e.x, e.y, e.z, Math.cos(a) * d, rr(0.5, 4), Math.sin(a) * d, rr(-1, 1), rr(0.5, 2), rr(-1, 1), e.size * rr(0.6, 1.0), e.size * 0.05, rr(7, 12), rr(0.62, 0.8), 0.8 * Math.min(1, k * 3), 0.32);
+            this.smokeP(e.x, e.y, e.z, Math.cos(a) * d, rr(0.5, 4), Math.sin(a) * d, rr(-1, 1), rr(0.5, 2), rr(-1, 1), e.size * rr(0.6, 1.0), e.size * 0.05, rr(7, 12), rr(0.62, 0.8), 0.8 * Math.min(1, k * 3), 0.55);
           }
           break;
         }
@@ -1011,7 +1011,7 @@ export class Effects {
           for (let j = 0; j < n; j++) {
             const lx = rr(-1, 1) * e.rad, lz = rr(-1, 1) * e.rad;
             if (fl && rnd() < 0.45) this.fireP(e.x, e.y, e.z, lx, 1.2, lz, rr(-0.4, 0.4), rr(2.5, 5), rr(-0.4, 0.4), e.size * rr(0.35, 0.6), e.size * 0.15, rr(0.45, 0.9), 0.6);
-            else if (heavy) this.smokeP(e.x, e.y, e.z, lx, 2, lz, rr(-0.3, 0.3), rr(2.5, 4.5), rr(-0.3, 0.3), e.size * rr(0.5, 0.8), e.size * 0.22, rr(4, 7), rr(0.1, 0.17), 0.7);
+            else if (heavy) this.smokeP(e.x, e.y, e.z, lx, 2, lz, rr(-0.3, 0.3), rr(2.5, 4.5), rr(-0.3, 0.3), e.size * rr(0.4, 0.65), e.size * 0.18, rr(3.5, 6), rr(0.1, 0.17), 0.55);
             else if (rnd() < 0.2) this.particles.add(e.x, e.y, e.z, lx, 1.4, lz, 0, 0.4, 0, e.size * 0.12, 0, rr(0.8, 1.6), RAMP_EMBER, 1, 0.5, 0.15, 0.9, 0, 0, SHAPE_CHIP, 1, 0);
             else this.smokeP(e.x, e.y, e.z, lx, 1.5, lz, rr(-0.3, 0.3), rr(1.2, 2.5), rr(-0.3, 0.3), e.size * rr(0.35, 0.6), e.size * 0.15, rr(4, 7), 0.28, 0.4);
           }
@@ -1116,7 +1116,7 @@ export class Effects {
         const last = --this.dCount;
         this.dT[i] = this.dT[last]; this.dKind[i] = this.dKind[last];
         for (let k = 0; k < 4; k++) this.dA[i * 4 + k] = this.dA[last * 4 + k];
-        if (kind === DELAY_EXPLODE) this.explode(a, this.ground(a, c) + b, c, d | 0, false, false);
+        if (kind === DELAY_EXPLODE) this.explode(a, this.ground(a, c), c, d | 0, false, false);
         else if (kind === DELAY_DUST) this.dustCloud(a, b, c, d);
       } else i++;
     }
@@ -1199,7 +1199,7 @@ export class Effects {
     if (kind === 3) apex = weapon === 'mortar' ? dist * 0.42 : weapon === 'rocket_arty' ? dist * 0.28 : weapon === 'grenade' ? 0.01 : dist * 0.34;
     else if (kind === 2) apex = weapon === 'antiship_missile' ? 0 : dist * 0.03;
     this.pApex[i] = apex;
-    this.pTrail[i] = W[weapon].trail;
+    this.pTrail[i] = W[weapon].trail * 2.2;
     this.pAcc[i] = 0;
   }
 
@@ -1224,9 +1224,9 @@ export class Effects {
       const trail = this.pTrail[i];
       const det = this.detail();
       if (kind === 2) {
-        this.flashP(x, y, z, 0, 0, 0, 1.6, 0.06, 1, 0.8, 0.4, 0.95);
+        this.flashP(x, y, z, 0, 0, 0, 3.2, 0.06, 1, 0.8, 0.4, 0.95);
       } else if (kind === 3) {
-        this.particles.add(x, y, z, 0, 0, 0, 0, 0, 0, 0.9, 0, 0.09, RAMP_FLASH, 0.9, 0.85, 0.7, 0.9, 0, 0, SHAPE_CHIP, 1, 0);
+        this.particles.add(x, y, z, 0, 0, 0, 0, 0, 0, 1.6, 0, 0.09, RAMP_FLASH, 0.9, 0.85, 0.7, 0.9, 0, 0, SHAPE_CHIP, 1, 0);
       } else if (kind === 4) {
         this.particles.add(x, y, z, 0, 0, 0, 0, 0, 0, 1.1, 0, 0.09, RAMP_DIRT, 0.12, 0.12, 0.11, 1, 0, 0, SHAPE_CHIP, 1, 0);
       }
@@ -1365,7 +1365,7 @@ export class Effects {
     const sc = 1;
     // Blitz
     this.flashP(x, oy, z, 0, R * 0.6, 0, R * 2.8, 0.14, 1, 0.9, 0.55, 0.95);
-    this.flashP(x, oy, z, 0, 0.3, 0, R * 4.5, 0.28, 1, 0.7, 0.3, 0.28);
+    this.flashP(x, oy, z, 0, 0.3, 0, R * 3.6, 0.22, 1, 0.65, 0.3, 0.14);
 
     // Feuerball
     const nF = this.count(X_FIRE[sz], 5);
@@ -1437,7 +1437,7 @@ export class Effects {
     if (this.camDist > FAR_SKIP || !this.inView(x, gy, z, radiusKm + 0.05)) return;
     // sichtbare Wolke: weiß-grau, quillt auf (schwächer skaliert, damit sie zum LOS-Radius passt)
     const rm = radiusKm * 1000;
-    const sc = 0.32;
+    const sc = 0.55;
     const n = this.count(40, 12);
     for (let i = 0; i < n; i++) {
       const a = rnd() * 6.283, d = Math.sqrt(rnd()) * rm * 0.35;
@@ -1558,7 +1558,7 @@ export class Effects {
       const bx = np > 1 ? this.pointAlong(geom, np, len * f, 0) : geom[0];
       const bz = np > 1 ? this.pointAlong(geom, np, len * f, 1) : geom[1];
       const order = (i % 2 === 0 ? i : nBurst - i) / nBurst; // von außen nach innen versetzt
-      this.schedule(order * dur + rr(0, 0.15), DELAY_EXPLODE, bx, 1.5, bz, i === Math.floor(nBurst / 2) ? 2 : 1);
+      this.schedule(order * dur + rr(0, 0.15), DELAY_EXPLODE, bx, 0, bz, i === Math.floor(nBurst / 2) ? 3 : 2);
       this.schedule(order * dur + rr(0.2, 0.4), DELAY_DUST, bx, this.ground(bx, bz), bz, 7);
     }
     if (!near) return;
@@ -1572,7 +1572,7 @@ export class Effects {
       const delay = f * dur;
       void delay;
       this.addDebris(bx, gy, bz, rr(-1.5, 1.5), rr(3.5, 5.5), rr(-1.5, 1.5), rr(-2, 2), rr(-1, 2), rr(-2, 2),
-        beam ? rr(7, 11) : rr(4, 7), beam ? 0.5 : 0.7, beam ? 0.6 : rr(2.5, 4), rr(5, 8), wat ? -3 : 0, [0x5a574f, 0x45423c, 0x6a665e, 0x3a3834][i & 3]);
+        beam ? rr(12, 18) : rr(7, 11), beam ? 1.0 : 1.3, beam ? 1.2 : rr(4, 6), rr(6, 9), wat ? -3 : 0, [0x5a574f, 0x45423c, 0x6a665e, 0x3a3834][i & 3]);
     }
   }
 

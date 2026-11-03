@@ -7,7 +7,15 @@ import { Input } from './core/Input';
 import type { Settings } from './core/types';
 import { RTSCamera } from './camera/RTSCamera';
 import { SelectionController } from './control/SelectionController';
+import { Sfx } from './audio/Sfx';
+import { CombatSystem } from './combat/CombatSystem';
+import { Effects } from './fx/Effects';
 import { START_PROFILES } from './game/countryData';
+import { War } from './game/War';
+import { BridgeRenderer } from './structures/BridgeRenderer';
+import { StructureManager } from './structures/StructureManager';
+import { CoverSystem } from './tactics/CoverSystem';
+import { TacticsSystem } from './tactics/TacticsSystem';
 import { GameState } from './game/GameState';
 import { NavGraph } from './nav/NavGraph';
 import { Pathfinder } from './nav/Pathfinder';
@@ -61,6 +69,23 @@ async function boot() {
   gfx.scene.add(ctl.object);
   const unitPanel = new UnitPanel(uiRoot, units, ctl);
 
+  // --- Kampf, Taktik, Bauwerke, Effekte (Phase 3)
+  const war = new War();
+  const cover = new CoverSystem(geo, settings);
+  const tactics = new TacticsSystem({ geo, units, cover, isHostile: (a, b) => war.isHostile(a, b), settings });
+  const structures = new StructureManager(geo, units, graph, cities, settings);
+  structures.setWar(war);
+  const bridges = new BridgeRenderer(geo, graph, settings);
+  const effects = new Effects(geo, settings);
+  const sfx = new Sfx();
+  const combat = new CombatSystem({ geo, units, war, settings, smoke: effects.smoke, cover, buildings: cities, structures });
+  gfx.scene.add(structures.object, bridges.object, effects.object);
+  ctl.cc.services = { combat, structures, cities, war };
+  const unlockAudio = () => sfx.resume();
+  window.addEventListener('pointerdown', unlockAudio, { once: true });
+  window.addEventListener('keydown', unlockAudio, { once: true });
+  bus.on('toast', ({ msg, kind }) => ctl.toast(msg, kind === 'error' ? 'bad' : kind ?? 'info'));
+
   // --- Spielzustand & UI
   const state = new GameState(geo);
   const labels = new Labels(labelRoot, geo, settings);
@@ -83,6 +108,12 @@ async function boot() {
     roads.applySettings(s);
     units.applySettings(s);
     unitRenderer.applySettings(s);
+    structures.applySettings(s);
+    bridges.applySettings(s);
+    effects.applySettings(s);
+    combat.applySettings(s);
+    cover.applySettings(s);
+    tactics.applySettings(s);
     rts.applySettings(s);
     picker.applySettings(s);
     labels.applySettings(s);
@@ -153,12 +184,20 @@ async function boot() {
     updateHover();
     state.update(dt);
     units.update(state.lastHours);
+    const gameSec = state.lastHours * 3600;
+    tactics.update(gameSec, dt);
+    combat.update(gameSec);
+    structures.update(state.lastHours, dt);
     ctl.update(dt);
     terrain.update(rts.camera, time);
     water.update(rts.camera, time);
     cities.update(rts.camera);
     roads.update(rts.camera);
+    bridges.update(rts.camera);
     unitRenderer.update(rts.camera, time, state.playerA3);
+    effects.update(dt, rts.camera, time, units.units);
+    effects.shake.apply(rts.camera, dt);
+    sfx.update(rts.camera);
     gfx.render(rts.camera, time);
     labels.update(rts.camera, window.innerWidth, window.innerHeight);
     if (state.playerA3) {
@@ -174,7 +213,7 @@ async function boot() {
   requestAnimationFrame(frame);
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx };
 }
 
 boot().catch((err: unknown) => {

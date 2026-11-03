@@ -3,8 +3,9 @@
 Browserbasiertes 3D-Echtzeit-Strategiespiel: Grand Strategy (Wirtschaft, Handel, Politik) trifft taktisches RTS
 im Retro-Look der PS2-Ära. Läuft komplett im Browser, ohne Installation.
 
-> **Stand: Phase 2 – Straßennetz & Einheiten.** Zusätzlich zu Phase 1 (3D-Karte, Kamera, Länderauswahl, PS2-Look):
-> Straßen-, Schienen- und Fährnetz als Navigationsgraph, 28 Einheitentypen, Auswahl, Formationen und Befehle.
+> **Stand: Phase 3 – Kampf.** Zusätzlich zu Phase 1 (3D-Karte, Kamera, Länderauswahl, PS2-Look) und Phase 2 (Straßennetz,
+> Einheiten, Befehle): Kampfsystem mit Effekten, Deckung für Infanterie, Gebäude besetzen, Gräben und Befestigungen,
+> Brücken sprengen und reparieren.
 
 ## Schnellstart
 
@@ -67,6 +68,15 @@ Tasten sind für deutsche QWERTZ-Tastaturen beschriftet. WASD bleibt der Kamera 
 | Alle im Bild | `Strg`+`A` |
 | Auswahl aufheben | `Esc` |
 | Einheit zum Testen erzeugen | Button „+ Einheit“ im Befehlspanel, dann auf die Karte klicken |
+| Angreifen | Rechtsklick auf einen feindlichen Verband (nur Länder im Krieg) |
+| Feuerbefehl | `K`, dann Zielpunkt: Artillerie, Mörser, Raketenwerfer, Panzer beschießen ein Gebiet |
+| Gebäude besetzen / räumen | `N`, dann Gebäude anklicken / `X` |
+| Bauen (Pioniere) | Button „Bauen“, Bauwerk wählen, Start- und Endpunkt klicken (`Shift` verlängert) |
+| Brücke sprengen / reparieren | `J` / `L`, dann Brücke anklicken (Pioniere nötig) |
+
+**Krieg testen:** Im Panel „+ Einheit“ oben einen fremden Besitzer wählen, Einheiten platzieren und „Krieg erklären“
+drücken. Einheiten von Ländern im Krieg bekämpfen sich automatisch. Bis zur Diplomatie (Phase 7) gibt es keinen
+anderen Weg, einen Krieg auszulösen.
 
 ## Was Phase 1 enthält
 
@@ -98,6 +108,24 @@ Tasten sind für deutsche QWERTZ-Tastaturen beschriftet. WASD bleibt der Kamera 
 - **Verbände:** Formationen, Verbandsgeschwindigkeit = langsamste Einheit, Wegpunkte, Patrouille.
 - **Zeitraffer:** Stufe 1 entspricht 10-facher Echtzeit, damit die Einheiten taktisch steuerbar bleiben.
 
+## Was Phase 3 enthält
+
+- **Kampf:** Sichtlinien über Gelände, Gebäude und Rauch; Treffer abhängig von Entfernung, Deckung und Panzerung
+  (Front, Seite, Heck); Unterdrückung und Moral, Munition und Erfahrung. Alle 28 Einheitentypen haben Waffen, darunter
+  Panzerkanonen, Panzerabwehrlenkwaffen, Artillerie mit Streuung, Raketenwerfer, Flugabwehr, Hubschrauber, Jets,
+  Bomber, FPV-Drohnen, Schiffe und U-Boote.
+- **Infanterie-Taktik:** Soldaten suchen selbst Deckung hinter Mauern, Wracks, Gräben, Trümmern und Geländekanten,
+  ändern die Haltung (stehen, kauern, liegen), springen über niedrige Hindernisse, weichen Granaten aus und werden von
+  Sanitätern versorgt. Unterdrückte Trupps bleiben liegen.
+- **Effekte:** Partikel-Explosionen, Feuer, Rauchsäulen, Mündungsfeuer, Leuchtspur, Raketenspuren, Trümmer,
+  Schockwellen, Einschlagskrater, ausgebrannte Wracks, Kamerawackeln und synthetisierte Geräusche (ohne Audiodateien).
+- **Bauwerke:** Gräben, Sandsäcke, Panzersperren, Stacheldraht, Bunker, MG-Nester, Mörser- und PAK-Stellungen,
+  Schützenlöcher, Minenfelder und Straßensperren. Pioniere bauen sie in Spielzeit, Fortschritt ist sichtbar.
+- **Gebäude:** Infanterie besetzt Stadtgebäude (Deckung und Sichtbonus). Beschädigte Gebäude dunkeln und kippen, zerstörte
+  fallen zu Trümmern zusammen.
+- **Brücken:** Pioniere legen Sprengladungen, ziehen sich zurück und sprengen. Die Kante im Wegenetz wird gesperrt, die
+  Wegfindung weicht aus. Reparatur ist möglich.
+
 ## Projektstruktur
 
 ```
@@ -112,7 +140,11 @@ src/
   camera/                   RTS-Kamera
   nav/                      Straßengraph, Wegfindung, Straßen-Rendering
   units/                    Einheitentypen, Simulation, Modelle und NATO-Symbole
-  control/                  Auswahl, Befehle, Kontrollgruppen
+  control/                  Auswahl, Befehle, Kontrollgruppen, Kampf-/Bau-Befehle
+  combat/                   Kampfsystem, Waffen, Sichtlinien
+  tactics/                  Deckungssystem, Infanterie-KI
+  structures/               Befestigungen, Gebäude-Besetzung, Brücken
+  fx/, audio/               Partikel, Wracks, Kamerawackeln, Geräusche
   game/                     Spielzustand, Länder-Startprofile
   ui/                       Hauptmenü, HUD, Minikarte, Labels, Einstellungen
 ```
@@ -125,7 +157,7 @@ server-autoritativ (Multiplayer) angebunden werden können.
 
 1. ✅ Grundgerüst: Karte, Kamera, Länderauswahl, PS2-Shader
 2. ✅ Straßennetz als Navigationsgraph, Einheiten, Auswahl, Formationen
-3. Kampfsystem, Effekte, Deckung, Gebäude, Gräben, Brücken sprengen
+3. ✅ Kampfsystem, Effekte, Deckung, Gebäude, Gräben, Brücken sprengen
 4. Zivilisten und Schutzstatus
 5. Ressourcen, Zufriedenheit, Logistik, Produktion
 6. Handelssystem

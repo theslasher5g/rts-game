@@ -125,11 +125,29 @@ const COL = {
   stake: 0xd9622a,
 };
 
+/**
+ * Geländehöhe (km) der *gerenderten* Oberfläche für aufgesetzte Teile. Das Gelände-Mesh hat seine Eckpunkte an den
+ * Zellecken (Mittel der 4 Zellmitten-Höhen, 2-km-Dreiecke) und weicht daher von geo.heightAt (bilinear zwischen
+ * Zellmitten) ab. Wir interpolieren die Eckwerte bilinear und addieren einen Anteil der Verwindung als Reserve.
+ */
+function surfaceKm(geo: GeoData, x: number, z: number): number {
+  const w = geo.width, hgt = geo.height, a = geo.heightsKm;
+  const gx = x / geo.cellKm, gz = z / geo.cellKm;
+  const i0 = Math.floor(gx), j0 = Math.floor(gz);
+  const fx = gx - i0, fz = gz - j0;
+  const cell = (i: number, j: number) => a[Math.max(0, Math.min(hgt - 1, j)) * w + Math.max(0, Math.min(w - 1, i))];
+  const corner = (i: number, j: number) => (cell(i - 1, j - 1) + cell(i, j - 1) + cell(i - 1, j) + cell(i, j)) * 0.25;
+  const c00 = corner(i0, j0), c10 = corner(i0 + 1, j0), c01 = corner(i0, j0 + 1), c11 = corner(i0 + 1, j0 + 1);
+  const h = (c00 * (1 - fx) + c10 * fx) * (1 - fz) + (c01 * (1 - fx) + c11 * fx) * fz;
+  const twist = Math.abs(c00 - c10 - c01 + c11);
+  return Math.max(0, h + twist * 0.3);
+}
+
 class PieceBuf {
   readonly data: number[] = [];
   constructor(private readonly geo: GeoData) {}
   add(x: number, z: number, ry: number, rx: number, rz: number, L: number, W: number, H: number, y0: number, color: number, flags: number, u: number): void {
-    this.data.push(x, z, ry, rx, rz, L, W, H, y0, color, flags, u, Math.max(0, this.geo.heightAt(x, z)));
+    this.data.push(x, z, ry, rx, rz, L, W, H, y0, color, flags, u, surfaceKm(this.geo, x, z));
   }
   get count(): number {
     return this.data.length / STRIDE;
@@ -351,11 +369,11 @@ const _c = new THREE.Color();
 const _cam = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
-const SCALE_K = 0.9;
+const SCALE_K = 6;
 const SCALE_MIN = 2;
-const SCALE_MAX = 70;
+const SCALE_MAX = 150;
 /** Ab diesem Kameraabstand (km) statt 3D-Teilen Symbole */
-const SYMBOL_DIST = 110;
+const SYMBOL_DIST = 60;
 const SYMBOL_MAX_DIST = 4000;
 const MAX_INSTANCES = 120000;
 
@@ -1137,6 +1155,7 @@ export class StructureManager {
     m.name = 'StructurePieces';
     m.count = 0;
     m.frustumCulled = false;
+    m.setColorAt(0, _c.setHex(0xffffff)); // instanceColor vor dem ersten Draw anlegen (Shader-Variante)
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     m.onBeforeRender = (_r, _s, camera) => this.refreshView(camera as THREE.PerspectiveCamera);
     return m;
@@ -1157,9 +1176,12 @@ export class StructureManager {
     const showSymbols = dist > SYMBOL_DIST && dist < SYMBOL_MAX_DIST;
     const show3d = dist <= SYMBOL_DIST * 1.0;
     this.symbols.visible = showSymbols && this.recs.size > 0;
-    this.mesh.visible = show3d && this.recs.size > 0;
+    // Hinweis: mesh bleibt immer sichtbar (sonst würde onBeforeRender nie mehr aufgerufen); ausgeblendet = count 0
     if (showSymbols && this.symbolsDirty) this.rebuildSymbols();
-    if (!show3d) return;
+    if (!show3d || this.recs.size === 0) {
+      if (this.mesh.count !== 0) { this.mesh.count = 0; this.viewDirty = true; }
+      return;
+    }
     const s = Math.min(SCALE_MAX, Math.max(SCALE_MIN, SCALE_K * dist));
     if (this.viewDirty || this.exag !== this.lastExag || Math.abs(s / this.lastScale - 1) > 0.05) {
       this.visScale = s;

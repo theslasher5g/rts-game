@@ -21,6 +21,7 @@ varying float vAdd;
 varying float vRot;
 varying float vSeed;
 varying float vShape;
+varying float vN;
 void main() {
   float K = 0.001 * pow(uVis, aMisc.w);
   vec3 w = aOrg + aPos.xyz * K;
@@ -28,6 +29,7 @@ void main() {
   float s = aPos.w * K;
   float minS = -mv.z * uPx * 1.6;
   s = aPos.w > 0.0 ? max(s, minS) : 0.0;
+  vN = clamp(floor(2.0 * s / (max(-mv.z, 0.001) * uPx) / 5.0 + 0.5), 3.0, 18.0);
   mv.xy += position.xy * s;
   gl_Position = projectionMatrix * mv;
   vCol = aCol;
@@ -50,6 +52,7 @@ varying float vAdd;
 varying float vRot;
 varying float vSeed;
 varying float vShape;
+varying float vN;
 float h21(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -63,7 +66,7 @@ void main() {
   float shade = 1.0;
   if (vShape < 0.5) {
     // klobiger, grob gerasterter Klecks
-    const float N = 6.0;
+    float N = vN;
     vec2 cell = floor((uv * 0.5 + 0.5) * N);
     vec2 ctr = ((cell + 0.5) / N) * 2.0 - 1.0;
     float d = length(ctr);
