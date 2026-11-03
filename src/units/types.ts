@@ -32,7 +32,7 @@ export interface UnitTypeDef {
   model: string;
 }
 
-export type OrderKind = 'move' | 'attackMove' | 'reverse' | 'hold' | 'defend' | 'retreat' | 'patrol' | 'stop';
+export type OrderKind = 'move' | 'attackMove' | 'reverse' | 'hold' | 'defend' | 'retreat' | 'patrol' | 'stop' | 'attack' | 'fireAt' | 'garrison' | 'build' | 'demolish' | 'repair';
 
 export interface Order {
   kind: OrderKind;
@@ -43,6 +43,11 @@ export interface Order {
   /** patrol: Ausgangspunkt der Schleife (vom UnitManager gesetzt) */
   originX?: number;
   originZ?: number;
+  /** attack: Ziel-Unit; garrison: Gebäude-ID; demolish/repair: NavEdge-ID; build: Structure-ID */
+  targetId?: number;
+  /** build: StructureKind; Polylinie in Welt-km [x0,z0,...] */
+  buildKind?: import('../combat/types').StructureKind;
+  points?: number[];
 }
 
 export interface Unit {
@@ -84,6 +89,33 @@ export interface Unit {
   onRoad?: boolean;
   /** Route zu orders[0] wird gerade berechnet (in der Warteschlange) */
   routePending?: boolean;
+  // --- Phase 3 (Kampf, vom CombatSystem/TacticsSystem gepflegt; optional)
+  /** 0..1 Unterdrückung (Suppression): bremst Feuerrate/Bewegung, zwingt Infanterie in Deckung */
+  suppression?: number;
+  /** Aktuelle Haltung der Infanterie (Renderer: Modelle stehen/kauern/liegen) */
+  posture?: import('../combat/types').Posture;
+  /** Belegter Deckungspunkt (CoverPoint.id) */
+  coverId?: number;
+  /** Position/Richtung der Deckung, damit der Renderer die Mitglieder dahinter anordnet (Welt-km; dir = Schutzrichtung) */
+  coverX?: number;
+  coverZ?: number;
+  coverDirX?: number;
+  coverDirZ?: number;
+  /** Gebäude-ID (BuildingInfo.id), wenn die Einheit darin besetzt ist (dann nicht gerendert) */
+  garrisonId?: number;
+  /** Aktuelles Kampfziel: Einheiten-ID oder 0; Positionsziel (Artillerie-Feuerbefehl) */
+  targetId?: number;
+  fireX?: number;
+  fireZ?: number;
+  /** Sekunden bis zum nächsten möglichen Schuss je Waffe (CombatSystem) */
+  cooldown?: number;
+  kills?: number;
+  /** Verwundete Soldaten (Infanterie); Sanitäter bergen sie */
+  wounded?: number;
+  /** Strukturbau-Auftrag (Pioniere): StructureInfo.id */
+  buildingStructureId?: number;
+  /** Feuer-/Gefechtsstatus für Anzeige */
+  engaged?: boolean;
 }
 
 export type UnitStance = 'free' | 'hold';
