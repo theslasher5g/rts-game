@@ -19,14 +19,14 @@ import { UNIT_TYPES } from './unitTypes';
 
 // ---------------------------------------------------------------- Tuning
 /** Sichtmaßstab = clamp(K · Kameraabstand, MIN, MAX) */
-export const VIS_SCALE_K = 0.6;
-export const VIS_SCALE_MIN = 2;
-export const VIS_SCALE_MAX = 150;
+export const VIS_SCALE_K = 4;
+export const VIS_SCALE_MIN = 3;
+export const VIS_SCALE_MAX = 600;
 /** Ab diesem Kameraabstand (km) NATO-Zeichen statt 3D-Modelle (± Hysterese) */
 export const COUNTER_DISTANCE = 350;
 const COUNTER_HYST = 0.08;
 /** Zeichengröße (CSS-Pixel) */
-const COUNTER_PX = 42;
+const COUNTER_PX = 36;
 const BAR_W = 30;
 const BAR_H = 7;
 
@@ -1166,7 +1166,7 @@ export class UnitRenderer {
 
       if (u.selected) {
         // Ring
-        const rr = this.counterMode ? COUNTER_PX * 0.62 * this.pxKm : Math.max(radius * 1.1, 14 * this.pxKm);
+        const rr = this.counterMode ? COUNTER_PX * 0.62 * this.pxKm : Math.max(radius * 0.65, 14 * this.pxKm);
         _p.set(u.x, ground + 0.001 * dist, u.z);
         _s.set(rr, 1, rr);
         _m.compose(_p, _q.identity(), _s);
@@ -1486,10 +1486,10 @@ export class UnitRenderer {
     else team.setHex(MAPCOLOR_TEAM[(meta?.mapColor ?? 0) % MAPCOLOR_TEAM.length]);
     const groundHex = CAMO[owner] ?? (DESERT.has(owner) ? 0x8a7a55 : 0x555a3c);
     c = {
-      ground: new THREE.Color(groundHex),
-      heli: new THREE.Color(DESERT.has(owner) ? 0x7a7458 : HELI_GREEN),
-      air: new THREE.Color(AIR_GREY),
-      naval: new THREE.Color(NAVAL_GREY),
+      ground: new THREE.Color(groundHex).multiplyScalar(1.7),
+      heli: new THREE.Color(DESERT.has(owner) ? 0x7a7458 : HELI_GREEN).multiplyScalar(1.6),
+      air: new THREE.Color(AIR_GREY).multiplyScalar(1.3),
+      naval: new THREE.Color(NAVAL_GREY).multiplyScalar(1.3),
       team,
     };
     this.ownerColors.set(owner, c);
