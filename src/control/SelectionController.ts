@@ -1,3 +1,5 @@
+import type { StructureKind } from '../combat/types';
+import { COMBAT_MODES, CombatControls, type CombatMode } from './CombatControls';
 import * as THREE from 'three';
 import { bus } from '../core/EventBus';
 import type { Input, InputDragEvent } from '../core/Input';
@@ -24,7 +26,7 @@ import { FORMATION_NAMES } from '../units/types';
  *   (zweimal schnell: Kamera), Strg+A alle eigenen Einheiten im Bild, Esc Modus abbrechen / Auswahl aufheben.
  */
 
-export type TargetMode = 'none' | 'move' | 'attackMove' | 'reverse' | 'patrol' | 'spawn';
+export type TargetMode = 'none' | 'move' | 'attackMove' | 'reverse' | 'patrol' | 'spawn' | 'fireAt' | 'garrison' | 'demolish' | 'repair' | 'build';
 
 export interface SelectionClickEvent {
   ndcX: number;
@@ -129,6 +131,12 @@ export class SelectionController {
   private readonly groups: number[][] = [[], [], [], [], [], [], [], [], [], []];
   private lastGroupKey = -1;
   private lastGroupTime = -1e9;
+
+  /** Phase 3: Kampf-/Bau-/Gebäudebefehle (Services werden von main.ts gesetzt) */
+  readonly cc: CombatControls = new CombatControls(this);
+
+  /** Testmodus: Besitzer gespawnter Einheiten (null = eigene Nation) */
+  testOwner: string | null = null;
 
   private _mode: TargetMode = 'none';
   private spawnType: string | null = null;
@@ -362,6 +370,13 @@ export class SelectionController {
     this.updateModeUi();
   }
 
+  /** Pioniere: Bauwerk platzieren (Panel-Palette) */
+  beginBuild(kind: StructureKind): void {
+    this.cc.buildKind = kind;
+    this.cc.resetBuild();
+    this.beginMode('build');
+  }
+
   /** Testmodus: nächster Linksklick platziert eine Einheit dieses Typs für den Spieler */
   beginSpawn(typeId: string): void {
     if (!this.playerA3) return;
@@ -371,6 +386,7 @@ export class SelectionController {
   }
 
   cancelMode(): void {
+    this.cc.resetBuild();
     if (this._mode === 'none') return;
     this._mode = 'none';
     this.spawnType = null;
@@ -542,7 +558,7 @@ export class SelectionController {
   }
 
   /** IDs ausgewählter eigener Einheiten (für Befehle) */
-  private commandIds(): number[] {
+  commandIds(): number[] {
     const out: number[] = [];
     this.sel.forEach((id) => {
       const u = this.units.get(id);
@@ -584,12 +600,21 @@ export class SelectionController {
   }
 
   private pickUnitAt(px: number, py: number): Unit | null {
+    return this.pickUnitWhere(px, py, (u) => this.isOwn(u));
+  }
+
+  /** Feindliche (laut War) Einheit unter dem Mauszeiger */
+  private pickEnemyAt(px: number, py: number): Unit | null {
+    return this.pickUnitWhere(px, py, (u) => !u.garrisonId && this.cc.isHostileOwner(u.owner));
+  }
+
+  private pickUnitWhere(px: number, py: number, accept: (u: Unit) => boolean): Unit | null {
     if (!this.playerA3) return null;
     let best: Unit | null = null;
     let bestD = Infinity;
     const p = this.projOut;
     for (const u of this.units.units) {
-      if (!this.isOwn(u)) continue;
+      if (!accept(u)) continue;
       if (!this.project(u.x, u.y, u.z, p)) continue;
       const r = Math.max(MIN_PICK_PX, this.unitRenderer.visualRadiusKm(u) * this.pxPerKm(p[2]));
       const d = Math.hypot(p[0] - px, p[1] - py);
@@ -629,6 +654,15 @@ export class SelectionController {
   }
 
   // ================================================================== intern: Eingaben
+
+  getUnit(id: number): Unit | undefined {
+    return this.units.get(id);
+  }
+
+  /** Suchradius (km) für Klicks auf Gebäude/Brücken, abhängig vom Zoom */
+  pickRadiusKm(): number {
+    return Math.min(30, Math.max(0.6, this.rts.distance * 0.03));
+  }
 
   private pickGround(px: number, py: number) {
     const w = this.canvas.clientWidth || 1, h = this.canvas.clientHeight || 1;
@@ -742,9 +776,15 @@ export class SelectionController {
       return;
     }
     if (!this.commandCount()) return;
+    const enemy = this.pickEnemyAt(e.x, e.y);
+    if (enemy) {
+      this.cc.attack(this.commandIds(), enemy);
+      this.toast(`Angriff auf ${enemy.name || enemy.type.name}`, 'info', 1200);
+      return;
+    }
     const own = this.pickUnitAt(e.x, e.y);
     if (own && !this.sel.has(own.id)) {
-      this.toast('Eskorte – folgt in Phase 3', 'info');
+      this.toast('Eskorte – folgt in einer späteren Phase', 'info');
       return;
     }
     const hit = this.pickGround(e.x, e.y);
@@ -758,10 +798,18 @@ export class SelectionController {
     const m = this._mode;
     if (m === 'spawn') {
       if (this.spawnType && this.playerA3) {
-        const u = this.units.spawn(this.spawnType, this.playerA3, hit.x, hit.z, this.viewHeading());
+        const u = this.units.spawn(this.spawnType, this.testOwner ?? this.playerA3, hit.x, hit.z, this.viewHeading());
         if (!u) this.toast('Platzierung hier nicht möglich', 'warn');
       }
       if (!e.shift) this.cancelMode();
+      return;
+    }
+    if (COMBAT_MODES.includes(m)) {
+      const done = this.cc.handleModeClick(m as CombatMode, hit.x, hit.z, e.shift);
+      if (done) {
+        this.cc.resetBuild();
+        this.cancelMode();
+      } else this.updateModeUi();
       return;
     }
     const kind: MoveOptions['kind'] = m === 'attackMove' ? 'attackMove' : m === 'reverse' ? 'reverse' : m === 'patrol' ? 'patrol' : 'move';
@@ -783,6 +831,12 @@ export class SelectionController {
     this.canvas.dataset.ctlMode = m;
     if (m === 'none') {
       this.modeHint.classList.add('hidden');
+      return;
+    }
+    if (COMBAT_MODES.includes(m)) {
+      this.modeHint.textContent = `${this.cc.hint(m as CombatMode)} · Rechtsklick/Esc: Abbruch`;
+      this.modeHint.className = `ctl-mode mode-${m}`;
+      this.modeHint.classList.remove('hidden');
       return;
     }
     const label =
@@ -866,6 +920,26 @@ export class SelectionController {
       case 'KeyF':
         consume();
         this.cycleFormation(e.shiftKey ? -1 : 1);
+        break;
+      case 'KeyK':
+        consume();
+        this.beginMode('fireAt');
+        break;
+      case 'KeyN':
+        consume();
+        this.beginMode('garrison');
+        break;
+      case 'KeyX':
+        consume();
+        this.cc.ungarrison();
+        break;
+      case 'KeyJ':
+        consume();
+        this.beginMode('demolish');
+        break;
+      case 'KeyL':
+        consume();
+        this.beginMode('repair');
         break;
       default:
         break;

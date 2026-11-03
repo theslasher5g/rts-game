@@ -4,6 +4,8 @@ import type { UnitManager } from '../units/UnitManager';
 import type { Unit, UnitCategory, UnitTypeDef } from '../units/types';
 import { FORMATION_NAMES } from '../units/types';
 import { UNIT_TYPES } from '../units/unitTypes';
+import { BUILD_CHOICES } from '../control/CombatControls';
+import { START_PROFILES } from '../game/countryData';
 
 /**
  * Phase 2 – Befehlspanel unten Mitte (zwischen Minikarte und Infopanel).
@@ -60,17 +62,6 @@ const CATEGORY_ICON: Record<UnitCategory, string> = {
   naval: '⚓',
 };
 
-interface Placeholder {
-  label: string;
-  tip: string;
-}
-const PLACEHOLDERS: Placeholder[] = [
-  { label: 'Gebäude', tip: 'Gebäude besetzen – Phase 3' },
-  { label: 'Graben', tip: 'Graben ausheben – Phase 3' },
-  { label: 'Verteidigen', tip: 'Verteidigen – Phase 3' },
-  { label: 'Eskorte', tip: 'Eskorte – Phase 3' },
-];
-
 interface DetailRefs {
   unit: Unit;
   hp: HTMLElement;
@@ -103,6 +94,7 @@ export class UnitPanel {
   private readonly groupRow: HTMLDivElement;
   private readonly spawnBtn: HTMLButtonElement;
   private readonly spawn: HTMLDivElement;
+  private readonly build: HTMLDivElement;
   private readonly spawnTypeBtns = new Map<string, HTMLButtonElement>();
 
   private visible = false;
@@ -169,13 +161,17 @@ export class UnitPanel {
     mk(ORDER_NAMES.patrol, 'B', 'Patrouille (B, dann Linksklick; Shift: weitere Punkte)', () => this.toggleMode('patrol'), 'patrol');
     mk(ORDER_NAMES.hold, 'Y', 'Stellung halten (Y)', () => this.ctl.hold());
     mk(ORDER_NAMES.stop, 'T', 'Stopp: alle Befehle löschen (T)', () => this.ctl.stop());
-    for (const p of PLACEHOLDERS) {
-      const b = btn(p.label, 'btn btn-sm up-order is-disabled');
-      b.title = p.tip;
-      b.setAttribute('aria-disabled', 'true');
-      b.addEventListener('click', () => this.ctl.toast(p.tip, 'info'));
-      oBtns.appendChild(b);
-    }
+    mk('Feuer', 'K', 'Feuerbefehl (K, dann Linksklick): Artillerie, Mörser, Raketenwerfer und Kampfpanzer feuern auf einen Punkt', () => this.toggleMode('fireAt'), 'fireAt');
+    mk('Gebäude', 'N', 'Gebäude besetzen (N, dann Gebäude anklicken): Deckungs- und Sichtbonus', () => this.toggleMode('garrison'), 'garrison');
+    mk('Räumen', 'X', 'Gebäude verlassen (X)', () => this.ctl.cc.ungarrison());
+    mk('Bauen', 'C', 'Pioniere: Graben, Sandsäcke, Panzersperren, Bunker … (Palette öffnen)', () => this.toggleBuild(), 'build');
+    mk('Sprengen', 'J', 'Brücke sprengen (J, dann Brücke anklicken) – Pioniere nötig', () => this.toggleMode('demolish'), 'demolish');
+    mk('Reparieren', 'L', 'Brücke reparieren (L, dann Brücke anklicken) – Pioniere nötig', () => this.toggleMode('repair'), 'repair');
+    const ph = btn('Eskorte', 'btn btn-sm up-order is-disabled');
+    ph.title = 'Eskorte – folgt in einer späteren Phase';
+    ph.setAttribute('aria-disabled', 'true');
+    ph.addEventListener('click', () => this.ctl.toast('Eskorte – folgt in einer späteren Phase', 'info'));
+    oBtns.appendChild(ph);
     oRow.appendChild(oBtns);
     cmd.append(fRow, oRow);
 
@@ -244,7 +240,53 @@ export class UnitPanel {
     sb.appendChild(el('div', 'mm-note', 'Platzierung nur zu Testzwecken. Rechtsklick oder Esc bricht ab.'));
     this.spawn.append(sh, sb);
 
-    this.panel.appendChild(this.spawn);
+    // Testwerkzeuge: Besitzer der gespawnten Einheiten + Kriegserklärung
+    const tools = el('div', 'up-testtools');
+    const ownerSel = document.createElement('select');
+    ownerSel.className = 'btn btn-sm';
+    const oOwn = document.createElement('option');
+    oOwn.value = '';
+    oOwn.textContent = 'Eigene Nation';
+    ownerSel.appendChild(oOwn);
+    for (const p of START_PROFILES) {
+      const o = document.createElement('option');
+      o.value = p.a3;
+      o.textContent = `${p.flag} ${p.name}`;
+      ownerSel.appendChild(o);
+    }
+    ownerSel.addEventListener('change', () => {
+      this.ctl.testOwner = ownerSel.value || null;
+    });
+    const warBtn = btn('Krieg erklären', 'btn btn-sm');
+    warBtn.title = 'Erklärt dem gewählten Besitzer den Krieg (Test, bis Diplomatie in Phase 7 kommt). Einheiten feindlicher Nationen kämpfen sofort.';
+    warBtn.addEventListener('click', () => {
+      const p = this.ctl.playerA3;
+      const o = this.ctl.testOwner;
+      if (!p || !o) return this.ctl.toast('Erst oben einen fremden Besitzer wählen', 'warn');
+      this.ctl.cc.services.war?.declare(p, o);
+    });
+    tools.append(el('span', 'up-lbl', 'Besitzer'), ownerSel, warBtn);
+    sb.prepend(tools);
+
+    // Bau-Palette (Pioniere)
+    this.build = el('div', 'panel up-build hidden');
+    const bh = el('div', 'panel-head');
+    const bx = btn('✕', 'btn btn-sm');
+    bx.addEventListener('click', () => this.toggleBuild(false));
+    bh.append(el('span', '', 'Pioniere · Bauen'), bx);
+    const bb = el('div', 'up-spawn-list');
+    for (const c of BUILD_CHOICES) {
+      const b = btn(c.label, 'btn btn-sm up-spawn-type');
+      b.title = c.tip;
+      b.addEventListener('click', () => {
+        this.ctl.beginBuild(c.kind);
+        this.toggleBuild(false);
+      });
+      bb.appendChild(b);
+    }
+    this.build.append(bh, bb);
+
+    this.panel.append(this.spawn, this.build);
     this.layer.appendChild(this.panel);
     root.appendChild(this.layer);
 
@@ -283,9 +325,14 @@ export class UnitPanel {
 
   // ------------------------------------------------------------------ intern
 
-  private toggleMode(m: 'move' | 'attackMove' | 'reverse' | 'patrol'): void {
+  private toggleMode(m: 'move' | 'attackMove' | 'reverse' | 'patrol' | 'fireAt' | 'garrison' | 'demolish' | 'repair'): void {
     if (this.ctl.mode === m) this.ctl.cancelMode();
     else this.ctl.beginMode(m);
+  }
+
+  private toggleBuild(open?: boolean): void {
+    const show = open ?? this.build.classList.contains('hidden');
+    this.build.classList.toggle('hidden', !show);
   }
 
   private toggleSpawn(open?: boolean): void {

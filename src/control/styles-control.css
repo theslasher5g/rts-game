@@ -203,3 +203,16 @@
 .up-spawn-type b { font-weight: normal; color: var(--amber); min-width: 42px; display: inline-block; }
 .up-spawn-type span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .up-spawn .mm-note { margin-top: 8px; font-size: 10px; color: var(--dim); }
+
+/* Phase 3 – Bau-Palette und Testwerkzeuge */
+.up-build {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+}
+.up-build .up-spawn-list { padding: 6px 8px 8px; }
+.up-testtools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0 4px; }
+.up-testtools select { max-width: 140px; }
