@@ -52,6 +52,12 @@ export interface SelectionControllerOptions {
 export const FORMATION_ORDER: Formation[] = ['line', 'column', 'wedge', 'spread'];
 
 export const ORDER_NAMES: Record<OrderKind, string> = {
+  attack: 'Angreifen',
+  fireAt: 'Feuerbefehl',
+  garrison: 'Gebäude besetzen',
+  build: 'Bauen',
+  demolish: 'Sprengen',
+  repair: 'Reparieren',
   move: 'Bewegen',
   attackMove: 'Angriffsbewegung',
   reverse: 'Rückwärts',
@@ -64,6 +70,12 @@ export const ORDER_NAMES: Record<OrderKind, string> = {
 
 /** Linienfarben je Befehlsart (RGB 0..1) */
 const ORDER_COLORS: Record<OrderKind, [number, number, number]> = {
+  attack: [1, 0.25, 0.2],
+  fireAt: [1, 0.55, 0.15],
+  garrison: [0.5, 0.7, 1],
+  build: [0.9, 0.8, 0.3],
+  demolish: [1, 0.4, 0.1],
+  repair: [0.4, 0.9, 0.9],
   move: [0.47, 0.86, 0.36],
   attackMove: [0.95, 0.33, 0.24],
   reverse: [0.95, 0.85, 0.27],
