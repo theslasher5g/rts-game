@@ -71,6 +71,8 @@ export interface Settings {
   edgeScroll: boolean;
   showLabels: boolean;
   showCities: boolean;
+  /** Phase 2: Straßen-/Schienennetz anzeigen */
+  showRoads: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -83,6 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   edgeScroll: true,
   showLabels: true,
   showCities: true,
+  showRoads: true,
 };
 
 /** Ergebnis eines Kartenpicks (Maus -> Welt) */
@@ -102,4 +105,11 @@ export interface GameEvents {
   'settings:changed': { settings: Settings };
   'camera:focus': { x: number; z: number; distance?: number };
   'game:start': { countryA3: string };
+  // Phase 2
+  /** Auswahl hat sich geändert (Unit-IDs) */
+  'units:selection': { ids: number[] };
+  'unit:spawned': { id: number };
+  'unit:removed': { id: number };
+  /** NavGraph-Kante geöffnet/gesperrt (Phase 3: Brücke gesprengt/repariert) */
+  'nav:edge': { edgeId: number; open: boolean };
 }

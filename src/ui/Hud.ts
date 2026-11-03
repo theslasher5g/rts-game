@@ -1,6 +1,7 @@
 import { bus } from '../core/EventBus';
 import { blocOf, getProfile, getRelation, relationClass, relationLabel, RESOURCE_INFO, type ResourceKey } from '../game/countryData';
 import type { GameState } from '../game/GameState';
+import { SPEED_LABELS } from '../game/GameState';
 import type { GeoData } from '../world/GeoData';
 import { SettingsPanel } from './SettingsPanel';
 
@@ -83,7 +84,7 @@ export class Hud {
     const time = div('hud-time');
     this.dateEl = div('hud-date', '—');
     const speeds = div('hud-speed');
-    const labels = ['❚❚', '1×', '2×', '3×', '4×', '5×'];
+    const labels = SPEED_LABELS;
     labels.forEach((l, i) => {
       const b = button(l, 'btn');
       b.title = i === 0 ? 'Pause (Leertaste)' : `Geschwindigkeit ${i} (Taste ${i})`;
