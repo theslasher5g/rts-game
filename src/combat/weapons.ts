@@ -49,8 +49,6 @@ export interface WeaponDef {
   autoFire?: boolean;
   /** Kamikaze: Schütze wird je Schuss um 1/memberCount verbraucht (FPV) */
   kamikaze?: boolean;
-  /** Bewegt Hitscan-Schuss ohne Impact-Event (Streufeuer) */
-  burst?: boolean;
 }
 
 function w(d: Partial<WeaponDef> & Pick<WeaponDef, 'id' | 'name' | 'kind' | 'damage' | 'rangeKm' | 'rofPerMin' | 'targets'>): WeaponDef {
@@ -71,15 +69,14 @@ function w(d: Partial<WeaponDef> & Pick<WeaponDef, 'id' | 'name' | 'kind' | 'dam
 
 const GR: TargetClass[] = ['ground'];
 const GRB: TargetClass[] = ['ground', 'building', 'structure'];
-const GRN: TargetClass[] = ['ground', 'naval'];
 const ALL_SURF: TargetClass[] = ['ground', 'naval', 'building', 'structure'];
 
 // --- Infanteriewaffen
-const RIFLE = w({ id: 'rifle', name: 'Sturmgewehre', kind: 'rifle', damage: 3, armorPen: 3, rangeKm: 0.5, rofPerMin: 60, accuracy: 0.42, suppression: 0.045, ammoPerShot: 0.05, moveFire: 0.3, targets: GR });
+const RIFLE = w({ id: 'rifle', name: 'Sturmgewehre', kind: 'rifle', damage: 4.5, armorPen: 3, rangeKm: 0.5, rofPerMin: 60, accuracy: 0.42, suppression: 0.07, ammoPerShot: 0.05, moveFire: 0.3, targets: GR });
 const GRENADE = w({ id: 'grenade', name: 'Handgranaten/Granatwerfer', kind: 'grenade', damage: 14, armorPen: 12, rangeKm: 0.09, rofPerMin: 6, accuracy: 0.55, splashKm: 0.008, suppression: 0.1, projectileSpeedKmh: 90, ammoPerShot: 0.4, moveFire: 0, targets: GRB, buildingMul: 0.3 });
-const MG = w({ id: 'mg', name: 'Maschinengewehr', kind: 'mg', damage: 4, armorPen: 4, rangeKm: 1.0, rofPerMin: 120, accuracy: 0.35, suppression: 0.075, ammoPerShot: 0.05, moveFire: 0.15, targets: GR });
+const MG = w({ id: 'mg', name: 'Maschinengewehr', kind: 'mg', damage: 5, armorPen: 4, rangeKm: 1.0, rofPerMin: 120, accuracy: 0.35, suppression: 0.12, ammoPerShot: 0.05, moveFire: 0.15, targets: GR });
 const RPG = w({ id: 'rpg', name: 'Panzerfaust', kind: 'rpg', damage: 52, armorPen: 82, rangeKm: 0.45, rofPerMin: 5, accuracy: 0.6, splashKm: 0.006, suppression: 0.12, projectileSpeedKmh: 1100, ammoPerShot: 1, moveFire: 0.1, vsSoft: 0.7, buildingMul: 0.8, targets: GRB });
-const ATGM_INF = w({ id: 'atgm_inf', name: 'Panzerabwehrlenkrakete', kind: 'atgm', damage: 78, armorPen: 98, rangeKm: 2.5, minRangeKm: 0.15, rofPerMin: 3, accuracy: 0.85, splashKm: 0.008, suppression: 0.15, projectileSpeedKmh: 700, ammoPerShot: 1, moveFire: 0, guided: true, topAttack: true, vsSoft: 0.4, buildingMul: 0.6, targets: GRB });
+const ATGM_INF = w({ id: 'atgm_inf', name: 'Panzerabwehrlenkrakete', kind: 'atgm', damage: 90, armorPen: 98, rangeKm: 2.5, minRangeKm: 0.15, rofPerMin: 4, accuracy: 0.85, splashKm: 0.008, suppression: 0.15, projectileSpeedKmh: 700, ammoPerShot: 1, moveFire: 0, guided: true, topAttack: true, vsSoft: 0.4, buildingMul: 0.6, targets: GRB });
 const SNIPER = w({ id: 'sniper', name: 'Scharfschützengewehr', kind: 'sniper', damage: 26, armorPen: 12, rangeKm: 1.5, rofPerMin: 7, accuracy: 0.88, suppression: 0.1, ammoPerShot: 0.5, moveFire: 0, targets: GR });
 const MORTAR = w({ id: 'mortar', name: 'Mörser 81 mm', kind: 'mortar', damage: 34, armorPen: 25, rangeKm: 7, minRangeKm: 0.35, rofPerMin: 10, accuracy: 0.5, splashKm: 0.035, suppression: 0.16, projectileSpeedKmh: 700, indirect: true, scatter: 0.006, ammoPerShot: 1, moveFire: 0, needsLOS: false, buildingMul: 0.6, targets: ALL_SURF });
 const DEMO = w({ id: 'demo', name: 'Sprengladung', kind: 'demo_charge', damage: 150, armorPen: 70, rangeKm: 0.03, rofPerMin: 4, accuracy: 0.95, splashKm: 0.03, suppression: 0.3, ammoPerShot: 1, moveFire: 0, buildingMul: 4, autoFire: false, targets: ALL_SURF });
@@ -111,7 +108,7 @@ const HELI_ROCKET = w({ id: 'heli_rocket', name: 'Raketenbehälter 70 mm', kind:
 const HELI_ATGM = w({ id: 'heli_atgm', name: 'Luft-Boden-Lenkrakete', kind: 'heli_atgm', damage: 80, armorPen: 100, rangeKm: 8, minRangeKm: 0.5, rofPerMin: 5, accuracy: 0.85, splashKm: 0.01, suppression: 0.15, projectileSpeedKmh: 1300, ammoPerShot: 1, moveFire: 0.8, guided: true, topAttack: true, vsSoft: 0.4, buildingMul: 0.7, targets: GRB });
 const AIR_MISSILE = w({ id: 'air_missile', name: 'Luft-Luft-Rakete', kind: 'air_missile', damage: 85, armorPen: 60, rangeKm: 60, minRangeKm: 1.0, rofPerMin: 6, accuracy: 0.68, splashKm: 0.03, suppression: 0.2, projectileSpeedKmh: 4000, ammoPerShot: 1, moveFire: 1, guided: true, needsLOS: false, targets: ['air'] });
 const AIR_GUN = w({ id: 'air_gun', name: 'Bordmaschinenkanone 27 mm', kind: 'air_gun', damage: 11, armorPen: 28, rangeKm: 2.0, rofPerMin: 200, accuracy: 0.38, splashKm: 0.004, suppression: 0.07, projectileSpeedKmh: 4000, ammoPerShot: 0.1, moveFire: 1, buildingMul: 0.2, targets: ['air', 'ground', 'building'] });
-const BOMB = w({ id: 'bomb', name: 'Freifallbombe', kind: 'bomb', damage: 130, armorPen: 70, rangeKm: 5, rofPerMin: 40, accuracy: 0.55, splashKm: 0.085, suppression: 0.45, projectileSpeedKmh: 0, indirect: true, scatter: 0, ammoPerShot: 1, moveFire: 1, needsLOS: false, topAttack: true, buildingMul: 3, autoFire: false, targets: ['ground', 'naval', 'building', 'structure'] });
+const BOMB = w({ id: 'bomb', name: 'Freifallbombe', kind: 'bomb', damage: 260, armorPen: 95, rangeKm: 5, rofPerMin: 40, accuracy: 0.55, splashKm: 0.085, suppression: 0.45, projectileSpeedKmh: 0, indirect: true, scatter: 0, ammoPerShot: 1, moveFire: 1, needsLOS: false, topAttack: true, buildingMul: 3, autoFire: false, targets: ['ground', 'naval', 'building', 'structure'] });
 const FPV = w({ id: 'fpv', name: 'FPV-Kamikazedrohne', kind: 'fpv', damage: 50, armorPen: 35, rangeKm: 0.05, rofPerMin: 60, accuracy: 0.65, splashKm: 0.012, suppression: 0.3, ammoPerShot: 1, moveFire: 1, needsLOS: false, topAttack: true, kamikaze: true, buildingMul: 0.5, targets: ['ground', 'naval', 'building'] });
 
 // --- Marine

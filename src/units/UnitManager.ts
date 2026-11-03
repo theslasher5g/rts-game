@@ -607,6 +607,13 @@ export class UnitManager {
       }
     }
 
+    // Phase 3 (InfantryAI): festgenagelte Infanterie (Suppression, Granatdeckung, Überwachungsphase) steht still;
+    // Befehle und Route bleiben erhalten.
+    if (u.pinned === true) {
+      u.speedKmh = Math.max(0, u.speedKmh - DECEL * dt);
+      return;
+    }
+
     if (!u.orders.length) {
       this.idle(u, m, dt);
       return;

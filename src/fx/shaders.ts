@@ -104,7 +104,7 @@ varying float vAlpha;
 varying float vAge;
 varying float vT;
 void main() {
-  float K = 0.001 * uVis;
+  float K = 0.001 * pow(uVis, 0.85);
   float age = max(0.0, uTime - aA.y);
   float t = clamp(age / max(aA.z, 0.001), 0.0, 1.0);
   float rad = aG.z * K;
