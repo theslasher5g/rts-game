@@ -1,0 +1,25 @@
+<!doctype html><html><body style="margin:0"><canvas id="c" style="width:100vw;height:100vh;display:block"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { GeoData } from '/src/world/GeoData';
+import { NavGraph } from '/src/nav/NavGraph';
+import { Pathfinder } from '/src/nav/Pathfinder';
+import { UnitManager } from '/src/units/UnitManager';
+import { UnitRenderer } from '/src/units/UnitRenderer';
+import { Terrain } from '/src/world/Terrain';
+import { GameRenderer } from '/src/render/GameRenderer';
+import { DEFAULT_SETTINGS } from '/src/core/types';
+const s={...DEFAULT_SETTINGS};
+const geo=await GeoData.load(); const graph=await NavGraph.load(geo); const pf=new Pathfinder(geo,graph);
+const gfx=new GameRenderer(document.getElementById('c'),s);
+const terrain=new Terrain(geo,s); gfx.scene.add(terrain.object);
+const um=new UnitManager(geo,pf,s); const ur=new UnitRenderer(um,geo,s); gfx.scene.add(ur.object);
+const t0=performance.now();
+um.spawnStartingForces('DEU',true); um.spawnStartingForces('POL',false); um.spawnStartingForces('FRA',false);
+window.spawnMs=performance.now()-t0;
+const cam=new THREE.PerspectiveCamera(32,innerWidth/innerHeight,1,30000);
+window.T={um,ur,geo,cam,gfx,terrain,THREE,
+ look(x,z,d){const p=62*Math.PI/180;cam.position.set(x,Math.sin(p)*d,z+Math.cos(p)*d);cam.lookAt(x,0,z);cam.updateMatrixWorld();},
+ frame(t){terrain.update(cam,t);ur.update(cam,t,'DEU');gfx.render(cam,t);}};
+window.ready=true;
+</script></body></html>
