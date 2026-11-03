@@ -40,6 +40,9 @@ export interface Order {
   z: number;
   /** Ziel-Blickrichtung in rad (0 = Norden/−Z, im Uhrzeigersinn), undefined = Fahrtrichtung */
   facing?: number;
+  /** patrol: Ausgangspunkt der Schleife (vom UnitManager gesetzt) */
+  originX?: number;
+  originZ?: number;
 }
 
 export interface Unit {
@@ -72,7 +75,18 @@ export interface Unit {
   selected: boolean;
   /** Verbandsname, z. B. '1. Panzerzug / 2. Kp' */
   name: string;
+  // --- Ergänzungen (Phase 2, vom UnitManager gepflegt; optional für Kompatibilität)
+  /** 'hold' = Stellung halten (nach issueHold), sonst 'free' */
+  stance?: UnitStance;
+  /** Luftfahrzeug ist in der Luft (false = gelandet/geparkt) */
+  airborne?: boolean;
+  /** Bewegt sich gerade auf einer Straße/Schiene (aktuelles Routensegment) */
+  onRoad?: boolean;
+  /** Route zu orders[0] wird gerade berechnet (in der Warteschlange) */
+  routePending?: boolean;
 }
+
+export type UnitStance = 'free' | 'hold';
 
 export interface MoveOptions {
   formation?: Formation;

@@ -6,6 +6,8 @@
  * - consumeWheel(): normiertes Mausrad seit letztem Aufruf (+ = herauszoomen, 1 ≈ eine Raste)
  * - consumeDrag(button): akkumulierte Zieh-Pixel für Button-Index (0 links, 1 Mitte, 2 rechts)
  * - onClick / onMove: Listener, geben Abmelde-Funktion zurück
+ * - onDragStart / onDrag / onDragEnd: Zieh-Vorgänge je Button (ab CLICK_SLOP_PX Auslenkung);
+ *   ein Zieh-Vorgang erzeugt keinen Klick. Phase 2: Rahmenauswahl (links), Formationsziehen (rechts).
  */
 
 export interface InputClickEvent {
@@ -17,6 +19,22 @@ export interface InputClickEvent {
   shift: boolean;
   ctrl: boolean;
   double: boolean;
+}
+
+export interface InputDragEvent {
+  button: number;
+  /** Startposition (Pointer-Down) in CSS-Pixeln relativ zum Canvas */
+  x0: number;
+  y0: number;
+  /** Aktuelle Position */
+  x: number;
+  y: number;
+  ndcX: number;
+  ndcY: number;
+  shift: boolean;
+  ctrl: boolean;
+  /** Nur bei onDragEnd: Vorgang abgebrochen (pointercancel / Fokusverlust) */
+  cancelled: boolean;
 }
 
 export interface InputMoveEvent {
@@ -41,6 +59,12 @@ export class Input {
   private readonly dragY = [0, 0, 0, 0, 0];
   private readonly clickFns = new Set<(e: InputClickEvent) => void>();
   private readonly moveFns = new Set<(e: InputMoveEvent) => void>();
+  private readonly dragStartFns = new Set<(e: InputDragEvent) => void>();
+  private readonly dragFns = new Set<(e: InputDragEvent) => void>();
+  private readonly dragEndFns = new Set<(e: InputDragEvent) => void>();
+  /** Button befindet sich in einem Zieh-Vorgang (Schwelle überschritten) */
+  private readonly dragging = [false, false, false, false, false];
+  private readonly dragEvt: InputDragEvent = { button: 0, x0: 0, y0: 0, x: 0, y: 0, ndcX: 0, ndcY: 0, shift: false, ctrl: false, cancelled: false };
 
   /** Laufende Pointer-Vorgänge je Button: Startposition + maximale Auslenkung */
   private readonly downActive = [false, false, false, false, false];
@@ -110,6 +134,7 @@ export class Input {
         this.downX[b] = this.mouse.x;
         this.downY[b] = this.mouse.y;
         this.downMaxDist[b] = 0;
+        if (this.dragging[b]) this.endDrag(b, e, true);
       }
       this.lastX = this.mouse.x;
       this.lastY = this.mouse.y;
@@ -136,6 +161,12 @@ export class Input {
           if (this.downActive[b]) {
             const d = Math.hypot(x - this.downX[b], y - this.downY[b]);
             if (d > this.downMaxDist[b]) this.downMaxDist[b] = d;
+            if (!this.dragging[b] && this.downMaxDist[b] >= CLICK_SLOP_PX) {
+              this.dragging[b] = true;
+              this.emitDrag(this.dragStartFns, b, e, false);
+            } else if (this.dragging[b] && (dx !== 0 || dy !== 0)) {
+              this.emitDrag(this.dragFns, b, e, false);
+            }
           }
         }
       }
@@ -154,6 +185,10 @@ export class Input {
       const b = e.button;
       if (b < 0 || b >= 5 || !this.downActive[b]) return;
       this.downActive[b] = false;
+      if (this.dragging[b]) {
+        this.endDrag(b, e, false);
+        return;
+      }
       const d = Math.max(this.downMaxDist[b], Math.hypot(this.mouse.x - this.downX[b], this.mouse.y - this.downY[b]));
       if (d >= CLICK_SLOP_PX) return;
       const now = performance.now();
@@ -184,7 +219,10 @@ export class Input {
     });
     listen(canvas, 'pointercancel', (e) => {
       this.mouse.buttons = e.buttons;
-      for (let b = 0; b < 5; b++) this.downActive[b] = false;
+      for (let b = 0; b < 5; b++) {
+        this.downActive[b] = false;
+        if (this.dragging[b]) this.endDrag(b, e, true);
+      }
     });
     listen(
       canvas,
@@ -239,11 +277,37 @@ export class Input {
     return () => this.moveFns.delete(fn);
   }
 
+  /** Zieh-Beginn (Schwelle überschritten). Das Ereignisobjekt wird wiederverwendet. */
+  onDragStart(fn: (e: InputDragEvent) => void): () => void {
+    this.dragStartFns.add(fn);
+    return () => this.dragStartFns.delete(fn);
+  }
+
+  /** Zieh-Bewegung (nach onDragStart). Das Ereignisobjekt wird wiederverwendet. */
+  onDrag(fn: (e: InputDragEvent) => void): () => void {
+    this.dragFns.add(fn);
+    return () => this.dragFns.delete(fn);
+  }
+
+  /** Zieh-Ende (Loslassen oder Abbruch, siehe `cancelled`). Das Ereignisobjekt wird wiederverwendet. */
+  onDragEnd(fn: (e: InputDragEvent) => void): () => void {
+    this.dragEndFns.add(fn);
+    return () => this.dragEndFns.delete(fn);
+  }
+
+  /** Läuft für diesen Button gerade ein Zieh-Vorgang? */
+  isDragging(button: number): boolean {
+    return this.dragging[button] === true;
+  }
+
   dispose(): void {
     this.cleanup.forEach((f) => f());
     this.cleanup.length = 0;
     this.clickFns.clear();
     this.moveFns.clear();
+    this.dragStartFns.clear();
+    this.dragFns.clear();
+    this.dragEndFns.clear();
     this.keys.clear();
   }
 
@@ -254,7 +318,31 @@ export class Input {
       this.downActive[b] = false;
       this.dragX[b] = 0;
       this.dragY[b] = 0;
+      if (this.dragging[b]) this.endDrag(b, null, true);
     }
+  }
+
+  private emitDrag(fns: Set<(e: InputDragEvent) => void>, b: number, e: PointerEvent | null, cancelled: boolean): void {
+    if (!fns.size) return;
+    const ev = this.dragEvt;
+    ev.button = b;
+    ev.x0 = this.downX[b];
+    ev.y0 = this.downY[b];
+    ev.x = this.mouse.x;
+    ev.y = this.mouse.y;
+    ev.ndcX = this.mouse.ndcX;
+    ev.ndcY = this.mouse.ndcY;
+    if (e) {
+      ev.shift = e.shiftKey;
+      ev.ctrl = e.ctrlKey || e.metaKey;
+    }
+    ev.cancelled = cancelled;
+    fns.forEach((fn) => fn(ev));
+  }
+
+  private endDrag(b: number, e: PointerEvent | null, cancelled: boolean): void {
+    this.dragging[b] = false;
+    this.emitDrag(this.dragEndFns, b, e, cancelled);
   }
 
   private updatePos(e: PointerEvent): void {

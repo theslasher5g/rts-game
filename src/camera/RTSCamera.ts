@@ -9,7 +9,7 @@ import type { GeoData } from '../world/GeoData';
  * Steuerung:
  *   Mausrad            Zoom (exponentiell, zum Mauszeiger hin)
  *   WASD / Pfeiltasten Schwenken (Shift = schneller)
- *   Rechte Maustaste   Karte greifen & ziehen
+ *   Rechte Maustaste   Karte greifen & ziehen (nur solange `rightDragPan` – Phase 2: aus, wenn Einheiten ausgewählt sind)
  *   Bildschirmrand     Schwenken (settings.edgeScroll)
  *   Q / E, Mittlere Maustaste horizontal ziehen: Drehen (settings.allowRotation)
  *   Pos1 / R           Norden oben (Drehung zurücksetzen)
@@ -47,6 +47,12 @@ export class RTSCamera {
   /** Aktueller (gedämpfter) Bodenpunkt, auf den die Kamera blickt */
   readonly target = new THREE.Vector3();
   enabled = true;
+  /**
+   * Rechts-Ziehen schwenkt die Karte. Der SelectionController setzt das pro Frame auf false,
+   * solange eigene Einheiten ausgewählt sind (Rechts-Ziehen = Formation/Blickrichtung).
+   * Die Zieh-Pixel werden trotzdem verbraucht, damit beim Umschalten nichts springt.
+   */
+  rightDragPan = true;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly input: Input;
@@ -199,7 +205,7 @@ export class RTSCamera {
       }
 
       // Rechte Maustaste: Karte greifen (Pixel -> Welt am Zielpunkt)
-      if (rdx !== 0 || rdy !== 0) {
+      if (this.rightDragPan && (rdx !== 0 || rdy !== 0)) {
         const h = this.canvas.clientHeight || 1;
         const wpp = (2 * dist * Math.tan((FOV_DEG * THREE.MathUtils.DEG2RAD) / 2)) / h;
         panX -= rdx * wpp;
