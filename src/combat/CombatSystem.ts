@@ -48,6 +48,9 @@ export interface CombatStats {
   /** Frames, in denen die Kampfzeit gekürzt wurde (hoher Zeitraffer) */
   clampedFrames: number;
   damageDealt: number;
+  /** Phase 4: Flächenschäden in eigenen/verbündeten Zivilgebieten (abgeschwächt) und abgewiesene Zielwahlen */
+  civilSplashOwn: number;
+  civilBlocked: number;
 }
 
 // ------------------------------------------------------------------ interne Typen
@@ -91,6 +94,8 @@ interface CU {
   hasTarget: boolean;
   dead: boolean;
   moraleT: number;
+  /** Phase 4: Zeitpunkt der letzten 'combat:order-target'-Meldung dieser Einheit (Absicht auffrischen) */
+  intentT: number;
 }
 
 interface Shell {
@@ -131,7 +136,7 @@ function isInfantry(u: Unit): boolean {
 }
 
 export class CombatSystem {
-  readonly stats: CombatStats = { shots: 0, hits: 0, kills: 0, scans: 0, shellsInFlight: 0, clampedFrames: 0, damageDealt: 0 };
+  readonly stats: CombatStats = { shots: 0, hits: 0, kills: 0, scans: 0, shellsInFlight: 0, clampedFrames: 0, damageDealt: 0, civilSplashOwn: 0, civilBlocked: 0 };
 
   private readonly geo: GeoData;
   private readonly units: UnitManager;
@@ -208,14 +213,74 @@ export class CombatSystem {
     this.hasEnemyM.fill(-1);
   }
 
+  // ------------------------------------------------------------------ Phase 4: Zivilschutz
+
+  /**
+   * Waffen/Träger, die in eigenen/verbündeten Zivilgebieten NICHT einsetzbar sind (Artillerie, Luftschläge, Bomben, FPV,
+   * Raketen, Schiffsartillerie). Direktfeuer (Gewehr, Panzerkanone, ...) bleibt für die Verteidigung eigener Städte erlaubt;
+   * sein Streuschaden wird in splash() abgeschwächt.
+   */
+  private civilBlockedWeapon(u: Unit, w: WeaponDef): boolean {
+    if (w.indirect || u.type.category === 'jet') return true;
+    switch (w.kind) {
+      case 'bomb': case 'fpv': case 'mortar': case 'howitzer': case 'rocket_arty': case 'heli_rocket':
+      case 'naval_gun': case 'antiship_missile': case 'air_missile':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /** Ist (x,z) für diese Waffe wegen Zivilschutz gesperrt? */
+  private blockedFor(u: Unit, w: WeaponDef, x: number, z: number): boolean {
+    if (!this.protection || !this.civilBlockedWeapon(u, w)) return false;
+    return this.protection.isProtected(x, z, u.owner);
+  }
+
+  /** Mindestens eine Waffe der Einheit ist dort einsetzbar? (false = alles gesperrt) */
+  private anyWeaponAllowed(u: Unit, st: CU, x: number, z: number): boolean {
+    for (let i = 0; i < st.weapons.length; i++) if (!this.blockedFor(u, st.weapons[i], x, z)) return true;
+    return false;
+  }
+
+  /** Meldet einen Zielpunkt/ein Ziel an das Schutz-/Ansehenssystem (gezielter Angriff). radiusKm 0 = Einheitenziel. */
+  private emitOrderTarget(u: Unit, st: CU, x: number, z: number, radiusKm: number): void {
+    let best: WeaponDef | null = null;
+    for (let i = 0; i < st.weapons.length; i++) {
+      const w = st.weapons[i];
+      if (!best || w.splashKm > best.splashKm) best = w;
+    }
+    if (!best) return;
+    st.intentT = this.time;
+    bus.emit('combat:order-target', { attacker: u.owner, x, z, radiusKm, weapon: best.kind });
+  }
+
+  /** Begründung für eine Sperre (ProtectionSystem.classify, falls vorhanden) */
+  private blockMsg(x: number, z: number, owner: string): string {
+    const p = this.protection as (TargetProtection & { classify?: (x: number, z: number, a: string, r?: number) => { reason: string } }) | undefined;
+    const r = p?.classify ? p.classify(x, z, owner, 0.05).reason : '';
+    return r || 'Ziel liegt in einem geschützten Gebiet.';
+  }
+
   orderAttack(unitIds: number[], targetId: number): void {
     const t = this.units.get(targetId);
     if (!t || t.hp <= 0) return;
+    let warned = false;
     for (const id of unitIds) {
       const u = this.units.get(id);
       if (!u || u.hp <= 0 || u === t) continue;
       const st = this.stateOf(u);
       if (!st.weapons.length || !this.hostile(u.owner, t.owner)) continue;
+      // Phase 4: eigene/verbündete Zivilgebiete – Artillerie, Luftschläge, Bomben, FPV gesperrt
+      if (this.protection && !this.isAirborneTarget(t) && !this.anyWeaponAllowed(u, st, t.x, t.z)) {
+        this.stats.civilBlocked++;
+        if (!warned) {
+          warned = true;
+          bus.emit('toast', { msg: this.blockMsg(t.x, t.z, u.owner), kind: 'warn' });
+        }
+        continue;
+      }
+      this.emitOrderTarget(u, st, t.x, t.z, 0);
       st.attackId = targetId;
       st.mission = false;
       st.resume = null;
@@ -233,15 +298,22 @@ export class CombatSystem {
   }
 
   orderFireAt(unitIds: number[], x: number, z: number): void {
+    let warned = false;
     for (const id of unitIds) {
       const u = this.units.get(id);
       if (!u || u.hp <= 0) continue;
       const st = this.stateOf(u);
       if (!st.weapons.length) continue;
       if (this.protection?.isProtected(x, z, u.owner)) {
-        bus.emit('toast', { msg: 'Ziel liegt in einem geschützten Gebiet.', kind: 'warn' });
+        // Phase 4: Flächenfeuer-/Angriffsbefehle auf eigene/verbündete Zivilgebiete werden abgelehnt
+        this.stats.civilBlocked++;
+        if (!warned) {
+          warned = true;
+          bus.emit('toast', { msg: this.blockMsg(x, z, u.owner), kind: 'warn' });
+        }
         continue;
       }
+      this.emitOrderTarget(u, st, x, z, 0.03);
       st.attackId = 0;
       st.resume = null;
       st.mission = true;
@@ -329,7 +401,7 @@ export class CombatSystem {
       attackId: 0, resume: null, mission: false, mX: 0, mZ: 0,
       airPhase: 0, minD: 1e9, egX: 0, egZ: 0, egT: 0, homeX: NaN, homeZ: NaN,
       hintId: 0, hintT: 0, hitX: 0, hitZ: 0, hitT: -99, retreatUntil: 0,
-      hasTarget: false, dead: false, moraleT: this.rand(),
+      hasTarget: false, dead: false, moraleT: this.rand(), intentT: -99,
     };
     for (let i = 0; i < n; i++) st.cd[i] = this.rand() * 1.5;
     if (u.membersAlive === undefined) u.membersAlive = u.type.memberCount;
@@ -613,6 +685,12 @@ export class CombatSystem {
         st.resume = null;
         return;
       }
+      // Phase 4: Angriffsziel liegt (inzwischen) in gesperrtem eigenem/verbündetem Zivilgebiet
+      if (this.protection && !this.isAirborneTarget(t) && !this.anyWeaponAllowed(u, st, t.x, t.z)) {
+        this.stats.civilBlocked++;
+        this.endAttack(u, st);
+        return;
+      }
       if (cat === 'jet') {
         if (this.isAirborneTarget(t)) this.driveJetAir(u, st, t);
         else if (!this.hasAmmoForRun(u, st)) this.endAttack(u, st);
@@ -631,6 +709,8 @@ export class CombatSystem {
       const t = this.units.get(st.cands[i]);
       if (!t || t.hp <= 0 || this.isAirborneTarget(t)) continue;
       if (fpv && (t.type.category === 'infantry' && t.garrisonId)) continue;
+      // Phase 4: autonome Angriffe (FPV, Jagdbomber) nie auf gesperrte Zivilgebiete
+      if (this.protection && !this.anyWeaponAllowed(u, st, t.x, t.z)) continue;
       st.attackId = t.id;
       st.resume = o ? { ...o } : null;
       st.airPhase = 0;
@@ -760,6 +840,12 @@ export class CombatSystem {
 
   private dropBombs(u: Unit, st: CU, wi: number, tx: number, tz: number, fallSec: number, dirX: number, dirZ: number, tUnit: Unit | null): void {
     const w = st.weapons[wi];
+    // Phase 4: kein Abwurf auf eigene/verbündete Zivilgebiete (auch nicht bei Überflug auf dem Weg); Absicht melden
+    if (this.protection && this.protection.isProtected(tx, tz, u.owner)) {
+      this.stats.civilBlocked++;
+      return;
+    }
+    this.emitOrderTarget(u, st, tx, tz, tUnit ? 0 : 0.06);
     const n = Math.min(3, Math.floor(u.ammo / w.ammoPerShot));
     const exp = 0.85 + 0.3 * u.experience;
     const sc = (0.045 / exp) * (1 + (u.suppression ?? 0));
@@ -972,7 +1058,8 @@ export class CombatSystem {
     if (w.kind === 'flak' && !(this.classMask(t) & MASK_AIR) && u.ammo < u.type.ammo * 0.6) return 0;
     if (!this.weaponReady(u, st, wi)) return 0;
     if (u.airborne === false && u.type.mobility.domain === 'air') return 0;
-    if (this.protection && this.protection.isProtected(t.x, t.z, u.owner)) return 0;
+    // Phase 4: Zivilschutz je Waffenklasse (Direktfeuer in eigenen Städten bleibt erlaubt)
+    if (this.protection && !this.isAirborneTarget(t) && this.blockedFor(u, w, t.x, t.z)) return 0;
     const prot = this.coverProt(t, u.x, u.z, w);
     const p = this.hitProb(u, w, t, d, prot);
     const dmg = this.shotDamage(w, t, u.x, u.z, prot);
@@ -1008,6 +1095,8 @@ export class CombatSystem {
       if (t) {
         const d = Math.hypot(t.x - u.x, t.z - u.z);
         if (t.hp <= 0 || d > w.rangeKm || d < w.minRangeKm || !(st.masks[wi] & this.classMask(t))) t = undefined;
+        // Phase 4: Ziel ist inzwischen in ein gesperrtes Zivilgebiet gewandert
+        else if (this.protection && !this.isAirborneTarget(t) && this.blockedFor(u, w, t.x, t.z)) t = undefined;
       }
       if (!t && st.nC > 0) t = this.pickTarget(u, st, wi);
       if (!t) {
@@ -1104,6 +1193,8 @@ export class CombatSystem {
       return;
     }
     st.hasTarget = true;
+    // Phase 4: Absicht alle ~2 Spielminuten auffrischen (laufende Feuermission = gezielter Befehl)
+    if (this.time - st.intentT > 120) this.emitOrderTarget(u, st, st.mX, st.mZ, 0.03);
     let shots = 0;
     while (st.cd[wi] <= 0 && shots < 3 && u.ammo >= w.ammoPerShot - 1e-6) {
       const a = this.rand() * 6.283, r = 0.025 * Math.sqrt(this.rand());
@@ -1358,7 +1449,13 @@ export class CombatSystem {
     if (R > 0 && !aa) {
       if (this.buildings) {
         const bs = this.buildings.buildingsInRadius(x, z, R + 0.015, this.tmpB);
-        const mul = w.buildingMul ?? 0.3;
+        // Phase 4: Streuschaden in eigenen/verbündeten Zivilgebieten stark abgeschwächt und gezählt
+        let civMul = 1;
+        if (this.protection && bs.length && this.protection.isProtected(x, z, owner)) {
+          civMul = 0.2;
+          this.stats.civilSplashOwn++;
+        }
+        const mul = (w.buildingMul ?? 0.3) * civMul;
         for (let i = 0; i < bs.length; i++) {
           const b = bs[i];
           if (b.integrity <= 0) continue;
