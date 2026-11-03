@@ -135,4 +135,17 @@ export interface GameEvents {
   // Krieg
   'war:declared': { a: string; b: string };
   'toast': { msg: string; kind?: 'info' | 'warn' | 'error' };
+  // Phase 4 – Zivilisten, Ansehen, Besatzung
+  /** Ein Befehl (Feuerbefehl/Angriff/Bombenlauf) zielt auf einen Punkt: Schutz-/Ansehenssystem klassifiziert (gezielter Angriff) */
+  'combat:order-target': { attacker: string; x: number; z: number; radiusKm: number; weapon: import('../combat/types').WeaponKind };
+  'civil:casualties': { cityId: number; country: string; killed: number; wounded: number; cause: import('../civil/types').CasualtyCause; attacker: string };
+  'civil:evacuate': { cityId: number; start: boolean };
+  'civil:infra': { id: number; kind: import('../civil/types').InfraKind; cityId: number; integrity: number; destroyed: boolean; attacker: string };
+  'civil:aid': { cityId: number; amount: number; by: string };
+  'warcrime': { attacker: string; victim: string; kind: import('../civil/types').WarCrimeKind; cityId: number; severity: number };
+  'reputation:changed': { a3: string; value: number; delta: number; reason: string };
+  'satisfaction:delta': { a3: string; delta: number; reason: string };
+  'city:captured': { cityId: number; by: string; from: string };
+  'city:unrest': { cityId: number; level: number };
+  'city:uprising': { cityId: number; against: string };
 }
