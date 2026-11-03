@@ -1,5 +1,6 @@
 import type { BuildingInfo, StructureKind } from '../combat/types';
 import type { Unit } from '../units/types';
+import type { ProtectionQuery } from '../civil/types';
 
 /**
  * Phase 3 – Befehle rund um Kampf, Bauen, Gebäude und Brücken.
@@ -29,6 +30,8 @@ export interface WarPort {
 }
 
 export interface ControlServices {
+  /** Phase 4: Zielklassifikation (eigene Zivilgebiete gesperrt, feindliche mit Warnung) */
+  protection?: ProtectionQuery;
   combat?: CombatPort;
   structures?: StructuresPort;
   cities?: CitiesPort;
@@ -75,6 +78,39 @@ export class CombatControls {
   buildKind: StructureKind = 'trench';
   /** Bereits gesetzte Punkte der aktuellen Bau-Linie [x,z,...] */
   private pending: number[] = [];
+  /** Bestätigung für Angriffe auf feindliche Zivilgebiete: zweiter Klick auf (nahezu) denselben Punkt */
+  private confirm: { x: number; z: number; t: number } | null = null;
+
+  /**
+   * Prüft ein Feuerziel gegen den Schutzstatus. true = Befehl darf erteilt werden.
+   * Eigene/verbündete Zivilgebiete: gesperrt. Feindliche Zivilgebiete und geschützte Infrastruktur: Warnung,
+   * Bestätigung durch erneuten Klick (Kriegsverbrechen, Ansehensverlust).
+   */
+  private checkTarget(x: number, z: number): boolean {
+    const prot = this.services.protection;
+    const me = this.c.playerA3;
+    if (!prot || !me) return true;
+    const cl = prot.classify(x, z, me, 0.4);
+    if (cl.cls === 'free') {
+      this.confirm = null;
+      return true;
+    }
+    if (cl.cls === 'own_civil') {
+      this.c.toast(`Gesperrt: ${cl.reason}`, 'bad', 3500);
+      this.confirm = null;
+      return false;
+    }
+    const now = performance.now();
+    const c = this.confirm;
+    if (c && now - c.t < 5000 && Math.hypot(c.x - x, c.z - z) < 1.5) {
+      this.confirm = null;
+      return true;
+    }
+    this.confirm = { x, z, t: now };
+    const pop = cl.populationAtRisk > 0 ? ` (≈ ${Math.round(cl.populationAtRisk).toLocaleString('de-DE')} Zivilisten im Wirkungsbereich)` : '';
+    this.c.toast(`WARNUNG: ${cl.reason}${pop}. Gezielter Angriff = Kriegsverbrechen. Zum Bestätigen erneut klicken.`, 'warn', 5000);
+    return false;
+  }
 
   constructor(private readonly c: ControllerPort) {}
 
@@ -106,6 +142,7 @@ export class CombatControls {
   }
 
   resetBuild(): void {
+    this.confirm = null;
     this.pending = [];
   }
 
@@ -150,6 +187,7 @@ export class CombatControls {
         this.c.toast('Keine feuerfähigen Einheiten ausgewählt', 'warn');
         return true;
       }
+      if (!this.checkTarget(x, z)) return false;
       s.combat.orderFireAt(shooters, x, z);
       return !shift;
     }
