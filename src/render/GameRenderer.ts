@@ -158,6 +158,8 @@ export class GameRenderer {
       depthBuffer: true,
       stencilBuffer: false,
       generateMipmaps: false,
+      // 32-bit-Float-Tiefe: zusammen mit dem log. Tiefenpuffer genug Präzision von 1 km bis 20 000 km
+      depthTexture: new THREE.DepthTexture(1, 1, THREE.FloatType),
     });
 
     this.postMat = new THREE.ShaderMaterial({

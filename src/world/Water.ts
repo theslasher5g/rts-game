@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { GeoData } from './GeoData';
 import type { Settings } from '../core/types';
-import { SUN_COLOR, SUN_DIR, getHeightTexture, getNoiseTextures } from './Terrain';
+import { SUN_COLOR, SUN_DIR, getCountryTexture, getHeightTexture, getNoiseTextures } from './Terrain';
 
 /** Ausdehnung der Wasserfläche über den Kartenrand hinaus (km) */
 const WATER_MARGIN_KM = 20000;
@@ -27,6 +27,8 @@ const FRAG = /* glsl */ `
 #include <fog_pars_fragment>
 
 uniform sampler2D uHeight;
+uniform sampler2D uIds;
+uniform vec2 uGrid;
 uniform sampler2D uNoiseN;
 uniform sampler2D uNoiseL;
 uniform vec2 uMapKm;
@@ -42,6 +44,17 @@ float fadeFor(vec2 uv, float a, float b) {
   return 1.0 - smoothstep(a, b, max(fw.x, fw.y));
 }
 
+float landAt(ivec2 c) {
+  vec4 t = texelFetch(uIds, clamp(c, ivec2(0), ivec2(uGrid) - 1), 0);
+  return (t.r > 0.002 && t.g < 0.002) ? 1.0 : 0.0;
+}
+float landCoverage(vec2 p) {
+  vec2 q = p - 0.5;
+  ivec2 i = ivec2(floor(q));
+  vec2 f = fract(q);
+  return mix(mix(landAt(i), landAt(i + ivec2(1, 0)), f.x), mix(landAt(i + ivec2(0, 1)), landAt(i + ivec2(1, 1)), f.x), f.y);
+}
+
 void main() {
   #include <logdepthbuf_fragment>
   vec2 xz = vWorld.xz;
@@ -50,6 +63,11 @@ void main() {
   vec2 outside = max(-xz, xz - uMapKm);
   float outKm = max(max(outside.x, outside.y), 0.0);
   float hk = texture2D(uHeight, clamp(uv, 0.0, 1.0)).r;
+  // Landzellen (auch unter NN, z. B. Polder/Kaspische Senke) nie mit Wasser bedecken – außer Seen
+  if (outKm <= 0.0) {
+    vec4 cid = texelFetch(uIds, clamp(ivec2(floor(uv * uGrid)), ivec2(0), ivec2(uGrid) - 1), 0);
+    if (cid.r > 0.002 && cid.g < 0.002) discard;
+  }
   hk = mix(hk, -4.0, smoothstep(0.0, 250.0, outKm));
   float depth = max(-hk, 0.0);
 
@@ -84,8 +102,9 @@ void main() {
   col += uSunColor * spec * 0.16 * max(f1, f2);
 
   // Brandung an der Küste
-  float fwD = fwidth(depth);
-  float coastBand = 1.0 - smoothstep(0.0, 0.004 + fwD * 1.5, depth);
+  float landCov = landCoverage(uv * uGrid);
+  float fwL = fwidth(landCov);
+  float coastBand = smoothstep(max(0.04, 0.3 - fwL * 1.5), 0.42, landCov);
   float foamNoise = texture2D(uNoiseN, (xz / 0.35 + vec2(tq * 0.6, -tq * 0.4)) / 64.0).r;
   float foam = coastBand * mix(0.6, step(0.45, foamNoise), f1) * step(outKm, 0.0);
   col = mix(col, srgb(vec3(0.78, 0.80, 0.78)), foam * 0.55);
@@ -105,6 +124,8 @@ export class Water {
     this.uniforms = {
       ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
       uHeight: { value: heightTex ?? getHeightTexture(geo) },
+      uIds: { value: getCountryTexture(geo) },
+      uGrid: { value: new THREE.Vector2(geo.width, geo.height) },
       uNoiseN: { value: noise.nearest },
       uNoiseL: { value: noise.linear },
       uMapKm: { value: new THREE.Vector2(geo.widthKm, geo.heightKm) },

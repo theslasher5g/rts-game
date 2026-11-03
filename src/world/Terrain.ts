@@ -217,7 +217,8 @@ void main() {
   float ndl = max(dot(n, uSunDir), 0.0);
   vLight = amb + uSunColor * ndl * 0.95;
 
-  float y = h * uExag;
+  // Meeresboden minimal absenken -> kein Z-Fighting mit der Wasserfläche bei y = 0
+  float y = h < 0.0 ? h * uExag - 0.06 : h * uExag;
   if (position.y > 0.5) {
     bool mapEdge = g.x <= 0.0 || g.y <= 0.0 || g.x >= uGrid.x || g.y >= uGrid.y;
     y = mapEdge ? min(y, 0.0) - 3.0 : y - (0.3 + uExag * 0.06 * s);
@@ -323,26 +324,34 @@ void main() {
   dry = clamp(dry, 0.0, 1.0);
   vec3 col = mix(cGrass, cFarm, smoothstep(0.45, 0.6, nBig));
   float forest = smoothstep(0.5, 0.66, nHuge * 0.6 + nBig * 0.4 + (0.3 - lat) * 0.5) * (1.0 - dry);
+  forest = max(forest, smoothstep(0.35, 0.8, hk) * (1.0 - smoothstep(1.2, 1.7, hk)) * 0.75 * (1.0 - dry));
   col = mix(col, cForest, forest);
   col = mix(col, mix(cDry, cDesert, smoothstep(0.85, 0.97, lat)), dry);
   col = mix(col, cTundra, smoothstep(0.12, 0.03, lat) * 0.8);
   // Küste: Sand
-  col = mix(cSand, col, smoothstep(0.003, 0.02, hk + (nMid - 0.5) * 0.008));
+  float nearSea = 0.0;
+  for (int k = 0; k < 4; k++) {
+    vec2 o = vec2(k == 0 ? 1.6 : (k == 1 ? -1.6 : 0.0), k == 2 ? 1.6 : (k == 3 ? -1.6 : 0.0));
+    if (idAt(p + o) == 0 && waterCoverage(p + o) < 0.5) nearSea = 1.0;
+  }
+  col = mix(col, cSand, nearSea * (1.0 - smoothstep(0.004, 0.035, hk + (nMid - 0.5) * 0.01)));
   // Fels an steilen/hohen Lagen
-  float rock = max(smoothstep(0.10, 0.22, vSlope + (nMid - 0.5) * 0.06), smoothstep(1.5, 2.6, hk));
+  float rock = max(smoothstep(0.06, 0.17, vSlope + (nMid - 0.5) * 0.05), smoothstep(1.3, 2.3, hk));
   col = mix(col, cRock, rock * 0.9);
   // Schnee: Schneegrenze sinkt nach Norden
   float snowLine = mix(0.7, 2.45, smoothstep(0.04, 0.75, lat)) + (nMid - 0.5) * 0.35;
   float snow = smoothstep(snowLine - 0.12, snowLine + 0.12, hk) * (1.0 - 0.5 * smoothstep(0.35, 0.6, vSlope));
   col = mix(col, cSnow, snow);
   // Meeresboden (unter der Wasserfläche)
-  if (hk < 0.0) col = mix(cSand, cFloor, smoothstep(0.0, 0.04, -hk));
+  if (hk < 0.0 && id == 0) col = mix(cSand, cFloor, smoothstep(0.0, 0.04, -hk));
   // Seen / Flüsse
   // Seen / Flüsse: binäre Flags bilinear interpolieren und schwellen -> abgerundete Konturen
   if (waterCoverage(p) > 0.42) col = cLake * (0.9 + 0.2 * nMid);
 
   // Körnige Detailtextur
-  col *= 0.84 + 0.2 * nFine + 0.08 * nGrit + 0.08 * nMid;
+  float nMicro = noiseN(wxz / 0.07 + 31.0);
+  col *= 0.8 + 0.2 * nFine + 0.12 * nMicro + 0.1 * nGrit + 0.06 * nMid - 0.06;
+  col *= vec3(1.0 + (nGrit - 0.5) * 0.08, 1.0, 1.0 - (nGrit - 0.5) * 0.08);
 
   // --- Politische Einfärbung
   int sel = int(uSelected + 0.5);
@@ -351,11 +360,12 @@ void main() {
   if (id > 0 && waterCoverage(p) <= 0.42) {
     vec3 pc = texelFetch(uPalette, ivec2(id, 0), 0).rgb;
     float ov = uOverlay * (1.0 - 0.7 * snow);
-    if (id == ply) { pc = texelFetch(uPalette, ivec2(0, 0), 0).rgb; ov = max(ov, 0.3) * 1.15; }
+    if (id == ply) ov = max(ov, 0.35);
     if (id == sel) ov = min(1.0, ov + 0.25);
     float l = lumOf(col);
     vec3 tinted = (col * 0.45 + vec3(l) * 0.55) * (pc / max(lumOf(pc), 0.02));
     col = mix(col, tinted, clamp(ov, 0.0, 1.0));
+    if (id == ply) col *= 1.08;
     if (id == hov) col = col * 1.22 + 0.015;
   }
 

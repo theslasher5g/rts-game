@@ -93,10 +93,9 @@ export class Input {
 
     // ---------- Pointer (nur Canvas) ----------
     listen(canvas, 'contextmenu', (e) => e.preventDefault());
-    listen(canvas, 'pointerenter', (e) => {
-      this.updatePos(e);
-      this.mouse.inside = true;
-    });
+    // "inside" wird erst durch echte Bewegung/Klicks gesetzt: ein synthetisches pointerenter
+    // an (0,0) beim Laden würde sonst sofort Randscrollen auslösen.
+    listen(canvas, 'pointerenter', (e) => this.updatePos(e));
     listen(canvas, 'pointerleave', () => {
       this.mouse.inside = false;
       this.hasLast = false;
@@ -124,6 +123,7 @@ export class Input {
     });
     listen(canvas, 'pointermove', (e) => {
       this.updatePos(e);
+      this.mouse.inside = true;
       this.mouse.buttons = e.buttons;
       const x = this.mouse.x, y = this.mouse.y;
       if (this.hasLast) {

@@ -80,8 +80,9 @@ async function boot() {
     if (c) rts.focus(c.label[0], c.label[1], Math.min(2200, Math.max(500, Math.sqrt(c.cells * 4) * 2.2)));
   });
 
-  input.onMove(({ ndcX, ndcY }) => {
-    const hit = picker.pick(ndcX, ndcY, rts.camera);
+  // Hover jedes Frame neu bestimmen (auch wenn sich nur die Kamera bewegt) – Picking kostet ~µs.
+  const updateHover = () => {
+    const hit = input.mouse.inside ? picker.pick(input.mouse.ndcX, input.mouse.ndcY, rts.camera) : null;
     const id = hit?.countryId ?? 0;
     if (id !== hoveredId) {
       hoveredId = id;
@@ -89,7 +90,8 @@ async function boot() {
       hud.setHoverInfo(id);
       bus.emit('country:hover', { id });
     }
-  });
+  };
+
   input.onClick(({ ndcX, ndcY, button, double }) => {
     if (button !== 0) return;
     const hit = picker.pick(ndcX, ndcY, rts.camera);
@@ -116,6 +118,7 @@ async function boot() {
     const time = (now - t0) / 1000;
 
     rts.update(dt);
+    updateHover();
     state.update(dt);
     terrain.update(rts.camera, time);
     water.update(rts.camera, time);
