@@ -41,6 +41,11 @@ async function boot() {
     w.go(c.pos[0], c.pos[1], dist);
   };
   w.goLL = (lon: number, lat: number, dist: number) => { const p = geo.lonLatToWorld(lon, lat); w.go(p[0], p[1], dist); };
+  w.goVillage = (lon: number, lat: number, dist: number, which = 0) => {
+    const p = geo.lonLatToWorld(lon, lat);
+    const list = detail.villages.clearingsInRect(p[0] - 15, p[1] - 15, p[0] + 15, p[1] + 15).sort((a: any, b: any) => Math.hypot(a.x - p[0], a.z - p[1]) - Math.hypot(b.x - p[0], b.z - p[1]));
+    const v = list[which]; w.lastVillage = v; w.go(v.x, v.z, dist);
+  };
   w.frames = (n: number) => {
     gfx.renderer.info.autoReset = false;
     const t = performance.now();

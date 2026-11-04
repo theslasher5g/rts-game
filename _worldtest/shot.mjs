@@ -13,6 +13,6 @@ for (const j of jobs) {
   let ms = 0;
   for (let k = 0; k < (j.warm ?? 6); k++) ms = await p.evaluate('window.frames(' + (j.nf ?? 3) + ')');
   console.log(j.name, 'ms/frame', ms.toFixed(0), JSON.stringify(await p.evaluate('window.info()')));
-  await p.screenshot({ path: `${out}/${j.name}.png` });
+  await p.screenshot({ path: `${out}/${j.name}.png`, timeout: 180000 });
 }
 await b.close();

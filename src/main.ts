@@ -1,6 +1,7 @@
 import '@fontsource/share-tech-mono';
 import './ui/styles.css';
 import './control/styles-control.css';
+import './ui/civil.css';
 
 import { bus } from './core/EventBus';
 import { Input } from './core/Input';
@@ -8,6 +9,11 @@ import type { Settings } from './core/types';
 import { RTSCamera } from './camera/RTSCamera';
 import { SelectionController } from './control/SelectionController';
 import { Sfx } from './audio/Sfx';
+import { CivilianSystem } from './civil/CivilianSystem';
+import { Occupation } from './civil/Occupation';
+import { ProtectionSystem } from './civil/ProtectionSystem';
+import { Reputation } from './game/Reputation';
+import { CivilPanel } from './ui/CivilPanel';
 import { CombatSystem } from './combat/CombatSystem';
 import { Effects } from './fx/Effects';
 import { START_PROFILES } from './game/countryData';
@@ -80,7 +86,19 @@ async function boot() {
   const sfx = new Sfx();
   const combat = new CombatSystem({ geo, units, war, settings, smoke: effects.smoke, cover, buildings: cities, structures });
   gfx.scene.add(structures.object, bridges.object, effects.object);
-  ctl.cc.services = { combat, structures, cities, war };
+
+  // --- Zivilisten, Schutzstatus, Ansehen, Besatzung (Phase 4)
+  const civil = new CivilianSystem({ geo, units, graph, pathfinder, cities, settings });
+  gfx.scene.add(civil.object);
+  const playerOf = () => state.playerA3;
+  const protection = new ProtectionSystem({ civil, war, units, player: playerOf });
+  combat.setProviders({ protection });
+  const reputation = new Reputation({ war, civil, player: playerOf, protection });
+  const occupation = new Occupation({ civil, units, war });
+  const civilPanel = new CivilPanel(uiRoot, civil, reputation, playerOf);
+  civilPanel.setOccupation(occupation);
+  units.roadSpeedFactor = (x, z) => civil.speedFactorAt(x, z);
+  ctl.cc.services = { combat, structures, cities, war, protection };
   const unlockAudio = () => sfx.resume();
   window.addEventListener('pointerdown', unlockAudio, { once: true });
   window.addEventListener('keydown', unlockAudio, { once: true });
@@ -109,6 +127,7 @@ async function boot() {
     units.applySettings(s);
     unitRenderer.applySettings(s);
     structures.applySettings(s);
+    civil.applySettings(s);
     bridges.applySettings(s);
     effects.applySettings(s);
     combat.applySettings(s);
@@ -137,6 +156,7 @@ async function boot() {
     ctl.playerA3 = countryA3;
     ctl.enabled = true;
     unitPanel.show();
+    civilPanel.show();
     for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
     if (c) rts.focus(c.label[0], c.label[1], Math.min(2200, Math.max(500, Math.sqrt(c.cells * 4) * 2.2)));
   });
@@ -160,6 +180,8 @@ async function boot() {
     const hit = picker.pick(ndcX, ndcY, rts.camera);
     if (!hit) return;
     bus.emit('country:select', { id: hit.countryId });
+    const city = civil.cityAt(hit.x, hit.z, 1.5);
+    if (city) civilPanel.selectCity(city.id);
     if (double) rts.focus(hit.x, hit.z, Math.max(30, rts.distance * 0.35));
   });
 
@@ -188,6 +210,17 @@ async function boot() {
     tactics.update(gameSec, dt);
     combat.update(gameSec);
     structures.update(state.lastHours, dt);
+    if (state.lastHours > 0) {
+      civil.update(state.lastHours, dt, rts.camera);
+      protection.update(state.lastHours);
+      reputation.update(state.lastHours);
+      occupation.update(state.lastHours);
+      if (state.playerA3) {
+        state.zufriedenheit = Math.max(0, Math.min(100, state.zufriedenheit + reputation.consumeSatisfactionDelta(state.playerA3)));
+      }
+    } else {
+      civil.update(0, dt, rts.camera);
+    }
     ctl.update(dt);
     terrain.update(rts.camera, time);
     water.update(rts.camera, time);
@@ -203,6 +236,7 @@ async function boot() {
     if (state.playerA3) {
       hud.update(dt);
       unitPanel.update(dt);
+      civilPanel.update(dt);
       minimap.update(rts.getGroundFootprint(), selectedId, playerId);
     }
     requestAnimationFrame(frame);
@@ -213,7 +247,7 @@ async function boot() {
   requestAnimationFrame(frame);
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation };
 }
 
 boot().catch((err: unknown) => {

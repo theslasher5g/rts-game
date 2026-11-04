@@ -1600,7 +1600,7 @@ export class CivilianSystem {
         this.sampleEdge(a.e, pos, this._p, this._d);
         if (Math.abs(this._p[0] - this.camFocusX) > R || Math.abs(this._p[1] - this.camFocusZ) > R) continue;
         const yaw = Math.atan2(this._d[0] * dir, this._d[1] * dir);
-        this.addVeh('train', this._p[0], this._p[1], yaw, 0.001 * Math.min(vs, 14), this.white, 0.0008 * Math.min(vs, 14));
+        this.addVeh('train', this._p[0], this._p[1], yaw, 0.001 * Math.min(vs, 5), this.white, 0.0008 * Math.min(vs, 5));
         continue;
       }
       for (let k = 0; k < a.n; k++) {
@@ -1699,7 +1699,7 @@ export class CivilianSystem {
         const seg = this.planPoint(plan, f.headKm, this._p);
         const p = plan.route.points;
         const yaw = Math.atan2(p[seg * 2 + 2] - p[seg * 2], p[seg * 2 + 3] - p[seg * 2 + 1]);
-        this.addVeh('train', this._p[0], this._p[1], yaw, 0.001 * Math.min(vs, 14), this.white, 0.0008 * Math.min(vs, 14));
+        this.addVeh('train', this._p[0], this._p[1], yaw, 0.001 * Math.min(vs, 5), this.white, 0.0008 * Math.min(vs, 5));
         continue;
       }
       const carLike = f.mode === 'car';

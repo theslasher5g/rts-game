@@ -147,6 +147,9 @@ interface ForceStats {
 export class UnitManager {
   readonly units: Unit[] = [];
 
+  /** Phase 4: Bremsfaktor durch Flüchtlingsströme auf Straßen (1 = frei, bis 0.3); von main.ts gesetzt */
+  roadSpeedFactor: ((x: number, z: number) => number) | null = null;
+
   private readonly geo: GeoData;
   private readonly routes: RouteProvider;
   private exag: number;
@@ -636,6 +639,7 @@ export class UnitManager {
     const rem = Math.max(0, m.routeLen - u.routeKm);
     let vt = r.segSpeed[seg] > 0 ? r.segSpeed[seg] : mob.offroadSpeed;
     if (u.groupSpeedCap < vt) vt = u.groupSpeedCap;
+    if (u.onRoad && this.roadSpeedFactor) vt *= this.roadSpeedFactor(u.x, u.z);
     if (u.fuel <= 0) vt = 0;
     if (isAir && u.type.category !== 'helicopter') {
       // Flugzeuge: beim Steigen langsamer, keine Bremsung vor dem Ziel (gehen in Warteschleife)
