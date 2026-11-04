@@ -93,6 +93,8 @@ async function boot() {
   const bridges = new BridgeRenderer(geo, graph, settings);
   const effects = new Effects(geo, settings);
   const sfx = new Sfx();
+  // Krater auf Straßen bekommen Asphaltfarbe
+  effects.setRoadQuery((x, z) => graph.nearestEdgePoint(x, z, 0.02) !== null);
   const combat = new CombatSystem({ geo, units, war, settings, smoke: effects.smoke, cover, buildings: cities, structures });
   gfx.scene.add(structures.object, bridges.object, effects.object);
 

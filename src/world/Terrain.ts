@@ -388,7 +388,7 @@ void main() {
   col = mix(col, cForest, forest);
   col *= 1.0 - forest * 0.16 * (1.0 - noiseN(wxz / 0.11));   // Kronen-Sprenkel passend zur Baumschicht
   col = mix(col, mix(cDry, cDesert, smoothstep(0.85, 0.97, lat)), dry);
-  col = mix(col, cTundra, smoothstep(0.12, 0.03, lat) * 0.8);
+  col = mix(col, cTundra, (1.0 - smoothstep(0.03, 0.12, lat)) * 0.8);
   // Küste: Sand
   float nearSea = 0.0;
   for (int k = 0; k < 4; k++) {

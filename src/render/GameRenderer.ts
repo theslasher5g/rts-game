@@ -69,7 +69,7 @@ void main() {
 
   // Vignette
   vec2 d = vUv - 0.5;
-  c *= mix(0.74, 1.0, smoothstep(0.85, 0.25, length(d * vec2(1.0, 0.85)) * 1.15));
+  c *= mix(0.74, 1.0, 1.0 - smoothstep(0.25, 0.85, length(d * vec2(1.0, 0.85)) * 1.15));
   // Scanlines + Körnung (sehr dezent)
   c *= 1.0 - 0.025 * mod(pix.y, 2.0);
   c += (hash12(pix + floor(uTime * 20.0) * 17.0) - 0.5) * 0.022;

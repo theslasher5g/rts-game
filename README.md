@@ -126,6 +126,24 @@ anderen Weg, einen Krieg auszulösen.
 - **Brücken:** Pioniere legen Sprengladungen, ziehen sich zurück und sprengen. Die Kante im Wegenetz wird gesperrt, die
   Wegfindung weicht aus. Reparatur ist möglich.
 
+## Detail-Update (Phase 5b)
+
+- **Fahrzeuge:** Kampfpanzer, Schützenpanzer, Haubitzen, Raketenwerfer, Flugabwehr und LKW mit etwa dreimal so vielen Details.
+  Türme drehen sich zum Ziel, Rohre schlagen beim Schuss zurück, Räder und Ketten laufen, Radar dreht sich. Ab 12 km wird
+  automatisch eine einfachere Variante gezeichnet. Kampfpanzer gibt es in drei Varianten (Valdoria westlich, Kronland
+  russisch, Marenia amerikanisch geprägt).
+- **Infanterie:** Soldaten mit Helm, Weste, Rucksack und Waffenvarianten je Rolle (Gewehr, MG, Panzerabwehr, Scharfschütze, Sanitäter,
+  Pionier, Mörser), eigene Tarnmuster je Nation, Lauf- und Zielanimation.
+- **Flugzeuge und Schiffe:** Jäger, Bomber, Hubschrauber, Drohnen mit Fahrwerk, Nachbrenner und Positionslichtern; Schiffe mit
+  drehenden Geschütztürmen und Radar.
+- **Straßen:** Fahrbahnen mit Markierungen je Klasse, Bankett, Mittelstreifen, Rampen, Rastplätze, Bahnübergänge, Gleisbett mit
+  Schwellen. 22 Arten von Straßenausstattung (Laternen, Leitplanken, Schilder, Schilderbrücken, Telefonmasten, Haltestellen,
+  Oberleitungsmasten). Brücken als Balken, Bogen, Fachwerk oder Schrägseil, mit Trümmerzustand.
+- **Häuser:** Läden mit Markisen, Balkone, Dachaufbauten, Fensterläden, Plattenbau-Treppenhäuser, Industriehallen, Kirchen, Scheunen.
+  Straßenleben mit Laternen, Bäumen, geparkten Autos. Schadensstufen von leicht beschädigt bis Trümmer, brennende Gebäude.
+- **Krater:** Echte Kraterschüsseln mit Wall und Auswurfstrahlen bei Einschlägen von Granaten, Raketen, Bomben und Lenkwaffen
+  (Radius 1 bis 25 m), Glut bei großen Einschlägen, graue Asphaltkrater auf Straßen.
+
 ## Was Phase 5 enthält
 
 - **Szenario „Operation Nordadria“:** 300 × 200 km, Raster 0,25 km, erzeugt aus echten Höhendaten. Drei erfundene Nationen

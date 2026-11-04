@@ -913,7 +913,7 @@ export class Cities {
       const r = Math.max(d[o + 2], d[o + 4]) * 0.5;
       if (burnFresh || this.fires.isBurning(id)) {
         const dur = 60 + 60 * Math.abs(Math.sin(id * 78.233) * 43758.5453 % 1);
-        if (burnFresh) this.fires.ignite(id, d[o], d[o + 1], d[o + 6], this.effectiveHeight(id) * (g <= 0 ? 1.4 : 1), r, dur);
+        if (burnFresh) this.fires.ignite(id, d[o], d[o + 1], d[o + 6], d[o + 3] * (g <= 0 ? 0.3 : 0.7), r, dur);
       }
     } else this.fires.extinguish(id);
     if (g <= 0) {

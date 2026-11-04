@@ -510,10 +510,10 @@ void main() {
   if (kind < 0.5) {
     // Brandfleck: dunkler Rußfleck, Schuttstreu, Ziegelbröckchen
     float edge = 0.88 + 0.28 * n1 - 0.12;
-    float core = smoothstep(edge, edge - 0.35, r);
+    float core = (1.0 - smoothstep(edge - 0.35, edge, r));
     a = core * 0.85;
     col = srgb(vec3(0.05, 0.045, 0.04)) * (0.7 + 0.6 * n2);
-    float dust = smoothstep(1.0, 0.7, r) * (1.0 - core);
+    float dust = (1.0 - smoothstep(0.7, 1.0, r)) * (1.0 - core);
     col = mix(col, srgb(vec3(0.34, 0.31, 0.27)), dust * 0.6);
     a = max(a, dust * 0.35);
     vec2 cell = floor(uv * 26.0);
@@ -525,8 +525,8 @@ void main() {
     }
   } else if (kind < 1.5) {
     float edge = 0.78 + 0.2 * n1;
-    float w = smoothstep(edge, edge - 0.06, r);
-    float bank = smoothstep(edge + 0.14, edge, r);
+    float w = (1.0 - smoothstep(edge - 0.06, edge, r));
+    float bank = (1.0 - smoothstep(edge, edge + 0.14, r));
     col = mix(srgb(vec3(0.33, 0.4, 0.22)), srgb(vec3(0.1, 0.22, 0.26)), w);
     col += w * 0.06 * vec3(sin(uv.x * 40.0 + n2 * 6.0));
     a = bank * 0.95;
@@ -559,7 +559,7 @@ void main() {
     a = step(bx, 0.0) * 0.96;
   } else if (kind < 5.5) {
     float edge = 0.85 + 0.25 * n1;
-    float c = smoothstep(edge, edge - 0.3, r);
+    float c = (1.0 - smoothstep(edge - 0.3, edge, r));
     col = mix(srgb(vec3(0.42, 0.36, 0.26)), srgb(vec3(0.5, 0.46, 0.38)), n2) ;
     col = mix(col, srgb(vec3(0.3, 0.26, 0.18)), step(0.78, n2) * 0.5);
     a = c * 0.9;
@@ -716,7 +716,7 @@ void main() {
     c.y += size * 0.45;
   } else {
     age = fract(uTime * 0.09 + ph);
-    c.y += aP.w * uScale * (0.6 + age * 5.0);
+    c.y += aP.w * uScale * (0.6 + age * 3.2);
     c.x += sin(uTime * 0.7 + ph * 9.0) * age * aP.w * uScale * 0.8;
     size *= 0.7 + age * 2.4;
   }
@@ -753,8 +753,8 @@ void main() {
     float n = hash21(floor(uv * 8.0) + vec2(t, vQ.x * 50.0));
     float w = pow(max(0.0, 1.0 - uv.y), 0.75) * 0.5;
     float d = abs(uv.x - 0.5);
-    float f = smoothstep(w, w * 0.4, d + (n - 0.5) * 0.12) * (1.0 - smoothstep(0.75, 1.0, uv.y + n * 0.2));
-    float core = smoothstep(0.7, 0.2, uv.y + d * 1.2 + n * 0.2);
+    float f = (1.0 - smoothstep(w * 0.4, w, d + (n - 0.5) * 0.12)) * (1.0 - smoothstep(0.75, 1.0, uv.y + n * 0.2));
+    float core = (1.0 - smoothstep(0.2, 0.7, uv.y + d * 1.2 + n * 0.2));
     vec3 col = mix(vec3(1.0, 0.25, 0.04), vec3(1.0, 0.85, 0.35), core);
     float a = f * vQ.z;
     if (a < 0.05) discard;
@@ -763,7 +763,7 @@ void main() {
     vec2 p = uv - 0.5;
     float r = length(p) * 2.0;
     float n = hash21(floor(uv * 7.0) + floor(vQ.x * 60.0));
-    float a = (1.0 - smoothstep(0.6 + n * 0.25, 1.0, r)) * (1.0 - vAge) * 0.62 * vQ.z;
+    float a = (1.0 - smoothstep(0.6 + n * 0.25, 1.0, r)) * (1.0 - vAge) * 0.85 * vQ.z;
     if (a < 0.04) discard;
     float dither = step(hash21(floor(gl_FragCoord.xy)), a * 1.4);
     if (dither < 0.5) discard;
@@ -891,7 +891,7 @@ export class BuildingFires {
         const s = f.seed * 7 + k * 1.7;
         const o = nf * 4;
         this.aPf[o] = f.x + Math.sin(s * 3.3) * spread;
-        this.aPf[o + 1] = yTop * 0.92;
+        this.aPf[o + 1] = yTop - f.hKm * hs * 0.08;
         this.aPf[o + 2] = f.z + Math.cos(s * 2.1) * spread;
         this.aPf[o + 3] = Math.min(0.016, 0.006 + f.r * 0.22) * (0.8 + 0.4 * ((s * 5.1) % 1));
         this.aQf[o] = (s * 0.37) % 1;
