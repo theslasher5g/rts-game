@@ -26,6 +26,13 @@ export interface OilFieldInfo {
   capacity: number;
   /** Zuordnung: Raffinerie/Basis, zu der geliefert wird (BaseInfo.id) oder -1 */
   destBaseId: number;
+  /** Phase 5 (Wirtschaft): Feld ist vom Raffineriestandort aus nicht per Straße erreichbar (UI: 'Abgeschnitten') */
+  cutOff?: boolean;
+  /** Eroberungsfortschritt 0..1 (feindliche Bodentruppen im Umkreis) und Eroberer-a3 */
+  captureProgress?: number;
+  capturer?: string;
+  /** brennt (Integrität < 0.4) */
+  burning?: boolean;
 }
 
 export type BaseKind = 'hq' | 'refinery' | 'barracks' | 'factory' | 'airfield' | 'shipyard' | 'depot' | 'fuel_depot';
@@ -42,6 +49,10 @@ export interface BaseInfo {
   hpMax: number;
   /** Radius (km), in dem Einheiten nachversorgt werden (Depots) bzw. der Ausgang liegt */
   radiusKm: number;
+  /** Phase 5: Anzeigename, z. B. 'Kaserne 2' */
+  name?: string;
+  /** Lagerbestand (Fässer) von Raffinerie/HQ-Depot, nur Anzeige */
+  stock?: number;
 }
 
 export interface ProductionOrderInfo {
@@ -54,6 +65,9 @@ export interface ProductionOrderInfo {
   /** Sammelpunkt (optional) */
   rallyX?: number;
   rallyZ?: number;
+  /** Phase 5: Preis in Fässern (Rückerstattung bei Abbruch) und Besitzer */
+  price?: number;
+  owner?: string;
 }
 
 /** Konvoi: Tankwagen oder Nachschub-LKW auf Route zwischen zwei Punkten */
@@ -67,6 +81,9 @@ export interface ConvoyInfo {
   cargo: number;
   /** zugehörige Unit-ID (Tankwagen-Verband) */
   unitId: number;
+  /** Phase 5: Zustand des Konvois und Zielfeld (kind 'oil') */
+  state?: 'idle' | 'toField' | 'loading' | 'toBase' | 'waiting' | 'recall';
+  fieldId?: number;
 }
 
 export interface OilPool {
@@ -78,4 +95,8 @@ export interface OilPool {
   spendPerHour: number;
   /** unterwegs befindliche Fässer */
   inTransit: number;
+  /** Phase 5: Summen seit Spielbeginn (Statistik) */
+  delivered?: number;
+  lostConvoys?: number;
+  lostBarrels?: number;
 }

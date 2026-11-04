@@ -1,5 +1,8 @@
+import { bus } from '../core/EventBus';
+import type { OilPool } from '../logistics/types';
 import type { GeoData } from '../world/GeoData';
-import { getProfile, RESOURCE_INFO, type ResourceStock, type StartProfile } from './countryData';
+import { getProfile, type ResourceStock, type StartProfile } from './countryData';
+import { OIL_START_BARRELS, SCENARIO_NATIONS, SCENARIO_WARS } from './scenario';
 
 /**
  * Spielstunden pro Echtzeitsekunde je Geschwindigkeitsstufe (Index = speed).
@@ -16,7 +19,9 @@ function emptyStock(): ResourceStock {
 }
 
 /**
- * Zentraler Spielzustand (Phase 1: Platzhalter-Simulation).
+ * Zentraler Spielzustand (Phase 5): Datum/Tempo, Zufriedenheit und das Ölguthaben des Spielers.
+ * Das Öl rechnet nicht GameState selbst, sondern das Wirtschaftssystem (src/logistics) und meldet es per
+ * Bus-Ereignis 'oil:balance' (für den Spieler) – oder direkt über `setOil()`.
  * Datum läuft in UTC; die Anzeige formatiert ebenfalls in UTC.
  */
 export class GameState {
@@ -25,8 +30,11 @@ export class GameState {
   date: Date = new Date(START_DATE);
   /** 0 = Pause, 1..5 */
   speed = 1;
+  /** Ölguthaben des Spielers (einzige Währung) */
+  readonly oil: OilPool = { barrels: OIL_START_BARRELS, incomePerHour: 0, spendPerHour: 0, inTransit: 0 };
+  /** @deprecated Kompatibilität: immer 0 (Ressourcenblöcke entfallen); Öl steht in `oil` */
   stock: ResourceStock = emptyStock();
-  /** Netto pro Tag (Produktion - Verbrauch) */
+  /** @deprecated Kompatibilität: immer 0 */
   readonly delta: ResourceStock = emptyStock();
   zufriedenheit = 50;
 
@@ -34,13 +42,31 @@ export class GameState {
 
   constructor(geo: GeoData) {
     this.geo = geo;
+    bus.on('oil:balance', (e) => {
+      if (e.owner !== this.playerA3) return;
+      this.oil.barrels = e.barrels;
+      this.oil.incomePerHour = e.incomePerHour;
+      this.syncShim();
+    });
+  }
+
+  /** Kriegspaare zu Spielbeginn (Vorgabe aus dem Szenario); main.ts ruft dafür `war.declare(a, b)` */
+  scenarioWars(): Array<[string, string]> {
+    return SCENARIO_WARS.map(([a, b]) => [a, b]);
+  }
+
+  /** Teilweise Aktualisierung des Ölguthabens (z. B. spendPerHour / inTransit aus dem Wirtschaftssystem) */
+  setOil(p: Partial<OilPool>): void {
+    Object.assign(this.oil, p);
+    this.syncShim();
   }
 
   startGame(a3: string): void {
-    const p = getProfile(a3);
-    if (!p) {
-      console.warn(`GameState.startGame: kein Startprofil für ${a3}`);
+    if (!SCENARIO_NATIONS.some((n) => n.a3 === a3 && n.playable)) {
+      console.warn(`GameState.startGame: ${a3} ist keine spielbare Szenario-Nation`);
+      return;
     }
+    const p = getProfile(a3);
     if (!this.geo.countriesByA3.has(a3)) {
       console.warn(`GameState.startGame: ${a3} nicht in den Geodaten`);
     }
@@ -48,10 +74,11 @@ export class GameState {
     this.profile = p ?? null;
     this.date = new Date(START_DATE);
     this.speed = 1;
-    this.stock = p ? { ...p.stock } : emptyStock();
-    for (const r of RESOURCE_INFO) {
-      this.delta[r.key] = p ? p.production[r.key] - p.consumption[r.key] : 0;
-    }
+    this.oil.barrels = OIL_START_BARRELS;
+    this.oil.incomePerHour = 0;
+    this.oil.spendPerHour = 0;
+    this.oil.inTransit = 0;
+    this.syncShim();
     this.zufriedenheit = p?.zufriedenheit ?? 50;
   }
 
@@ -65,10 +92,11 @@ export class GameState {
     if (hours <= 0) return;
     this.lastHours = hours;
     this.date.setTime(this.date.getTime() + hours * 3_600_000);
-    const days = hours / 24;
-    for (const r of RESOURCE_INFO) {
-      const v = this.stock[r.key] + this.delta[r.key] * days;
-      this.stock[r.key] = v > 0 ? v : 0;
-    }
+  }
+
+  /** Alt-Felder `stock.oel` / `delta.oel` spiegeln das Ölguthaben (pro Tag), alle anderen bleiben 0 */
+  private syncShim(): void {
+    this.stock.oel = this.oil.barrels;
+    this.delta.oel = (this.oil.incomePerHour - this.oil.spendPerHour) * 24;
   }
 }

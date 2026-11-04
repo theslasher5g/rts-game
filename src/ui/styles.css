@@ -575,3 +575,120 @@ input[type='range']::-moz-range-thumb { width: 10px; height: 14px; background: v
   .mm-title .mm-sub { font-size: 11px; }
   .hud-drawer { max-height: 50vh; }
 }
+
+/* ==========================================================================
+   Phase 5 – Szenario: Hauptmenü (Briefing, Nationen-Karten), Ölanzeige, Reiter
+   ========================================================================== */
+.tag-BUND { color: #6fa6e8; }
+.tag-PAKT { color: #e2614a; }
+
+.mm-brief {
+  position: absolute;
+  left: 14px;
+  top: 112px;
+  width: 470px;
+  max-width: calc(50vw - 24px);
+}
+.mm-brief-body { padding: 6px 12px 8px; font-size: 11.5px; line-height: 1.4; }
+.mm-brief-body ul { margin: 0; padding: 0; list-style: none; }
+.mm-brief-body li { padding-left: 14px; position: relative; margin-bottom: 3px; }
+.mm-brief-body li::before { content: '▸'; position: absolute; left: 0; color: var(--amber); }
+.mm-goal { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line-dim); color: var(--amber-hi); font-size: 11px; letter-spacing: 0.08em; }
+
+.mm-side {
+  position: absolute;
+  right: 14px;
+  top: 112px;
+  width: 300px;
+}
+.mm-side-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.mm-side-body .btn { width: 100%; }
+.mm-side-body .btn-primary { padding: 9px 10px; font-size: 15px; letter-spacing: 0.12em; }
+.mm-side-body .mm-hint { font-size: 10px; color: var(--dim); text-align: center; letter-spacing: 0.05em; }
+.mm-seed { display: grid; grid-template-columns: 1fr; gap: 4px; font-size: 10px; letter-spacing: 0.1em; }
+.mm-seed-input {
+  font: inherit;
+  font-size: 14px;
+  color: var(--amber-hi);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  outline: none;
+  user-select: text;
+}
+.mm-seed-input:focus { border-color: var(--amber); }
+
+.mm-cards {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 12px;
+  pointer-events: none !important;
+}
+.mm-card {
+  pointer-events: auto;
+  flex: 0 1 340px;
+  min-width: 0;
+  background: var(--panel);
+  border: 1px solid var(--line-dim);
+  border-top: 4px solid var(--nation, var(--amber));
+  padding: 8px 12px 10px;
+  cursor: pointer;
+  outline: none;
+  backdrop-filter: blur(2px);
+}
+.mm-card:hover, .mm-card:focus-visible { background: var(--panel-2); border-color: var(--line); border-top-color: var(--nation, var(--amber)); }
+.mm-card.active { background: var(--panel-hi); border-color: var(--amber); border-top-color: var(--nation, var(--amber)); box-shadow: 0 0 0 1px var(--amber), 0 0 18px rgba(227, 165, 52, 0.25); }
+.mc-head { display: flex; align-items: center; gap: 10px; }
+.mc-head > div { flex: 1; min-width: 0; }
+.mc-flag { font-size: 28px; }
+.mc-name { font-size: 15px; color: var(--amber-hi); text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-sub { font-size: 10px; color: var(--dim); letter-spacing: 0.06em; }
+.mm-card .mm-diff { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+.mc-blurb { font-size: 11px; color: var(--text); margin: 6px 0 2px; line-height: 1.4; min-height: 31px; }
+.mc-rel { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; font-size: 11px; }
+
+/* Ölanzeige */
+.hud-oil {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 4px 14px;
+  border-width: 0 1px 1px 0;
+  min-height: 40px;
+  align-self: flex-start;
+  min-width: 300px;
+}
+.oil-main { display: flex; align-items: center; gap: 10px; }
+.oil-ic { display: inline-flex; filter: drop-shadow(0 0 5px rgba(227, 165, 52, 0.5)); }
+.oil-vals { display: flex; flex-direction: column; line-height: 1.05; }
+.oil-k { font-size: 9px; color: var(--dim); letter-spacing: 0.14em; }
+.oil-v { font-size: 24px; color: var(--amber-hi); letter-spacing: 0.04em; text-shadow: 1px 1px 0 #000; min-width: 76px; }
+.hud-oil.low .oil-v { color: var(--bad); animation: blink 1s steps(2) infinite; }
+.oil-flow { display: flex; flex-direction: column; font-size: 11px; line-height: 1.25; white-space: nowrap; }
+.oil-flow .pos { color: var(--good); }
+.oil-flow .neg { color: var(--bad); }
+.oil-flow .muted { color: var(--dim); }
+.oil-trn { color: var(--khaki); }
+.hud-supply { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; justify-content: flex-end; font-size: 11px; }
+.hud-supply:empty { display: none; }
+
+/* Reiter-Inhalte (registerTab) */
+.hud-tab-pane[hidden] { display: none !important; }
+.hud-tab-content:empty::before { content: 'Keine Daten'; color: var(--dim); font-size: 11px; }
+
+@media (max-width: 1360px) {
+  .mm-brief { width: 400px; }
+  .mm-side { width: 260px; }
+  .mm-card { flex-basis: 300px; padding: 6px 10px 8px; }
+  .oil-v { font-size: 20px; }
+}
+@media (max-height: 800px) {
+  .mm-card .mc-more { display: none; }
+  .mc-blurb { min-height: 0; }
+}

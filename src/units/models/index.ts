@@ -6,7 +6,7 @@ import { buildSoldier, type SoldierKind } from './infantry';
 import { buildDestroyer, buildFrigate, buildSubmarine } from './naval';
 import { buildIfv, buildLightTank, buildMbt, buildSpaa, buildSpg } from './tanks';
 import {
-  buildAidTruck, buildAmbulance, buildApc8x8, buildFieldHospital, buildMlrs, buildRecon4x4, buildSam, buildTruck,
+  buildAidTruck, buildAmbulance, buildApc8x8, buildFieldHospital, buildFuelTruck, buildMlrs, buildRecon4x4, buildSam, buildTruck,
 } from './vehicles';
 
 export type { ModelDef };
@@ -49,6 +49,7 @@ export function buildModels(): Record<string, ModelDef> {
   M.sam = buildSam();
   M.truck = buildTruck();
   M.aid_truck = buildAidTruck();
+  M.fuel_truck = buildFuelTruck();
   M.field_hospital = buildFieldHospital();
   M.ambulance = buildAmbulance();
   M.soldier = buildSoldier('inf');

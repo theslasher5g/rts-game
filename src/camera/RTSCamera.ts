@@ -16,16 +16,18 @@ import type { GeoData } from '../world/GeoData';
  */
 
 const FOV_DEG = 32;
-const MIN_DIST = 6;
-const MAX_DIST = 7500;
+/** Kleinster Kameraabstand (km): Soldaten sind ab ca. 2–3 km lesbar */
+const MIN_DIST = 1.5;
+/** Max. Herauszoomen relativ zum Abstand, der die ganze Karte einpasst */
+const MAX_ZOOM_OUT = 1.15;
+/** Rand (Anteil), den die Startansicht um die Karte lässt */
+const FIT_MARGIN = 1.04;
 /** Neigung (Grad nach unten) bei minimalem / großem Abstand */
 const PITCH_NEAR = 42;
 const PITCH_FAR = 62;
-/** Abstand, ab dem die volle Fern-Neigung erreicht ist */
-const PITCH_FAR_DIST = 2500;
+/** Anteil des Einpass-Abstands, ab dem die volle Fern-Neigung erreicht ist */
+const PITCH_FAR_FRACTION = 0.6;
 const LN_MIN = Math.log(MIN_DIST);
-const LN_MAX = Math.log(MAX_DIST);
-const LN_PITCH_FAR = Math.log(PITCH_FAR_DIST);
 
 /** Zoomfaktor pro normierter Mausrad-Raste */
 const ZOOM_PER_NOTCH = 1.18;
@@ -60,6 +62,12 @@ export class RTSCamera {
   private exaggeration = 1;
   private allowRotation = true;
   private edgeScroll = true;
+  /** Abstand, bei dem die ganze Karte ins Bild passt (aus Kartenmaßen & Seitenverhältnis) */
+  private fitDist = 300;
+  private lnMax = Math.log(345);
+  private lnPitchFar = Math.log(180);
+  /** Solange der Spieler weder gezoomt noch geschwenkt hat, folgt die Startansicht dem Seitenverhältnis */
+  private autoFit = true;
 
   // Zielzustand (ungedämpft)
   private goalX = 0;
@@ -107,13 +115,37 @@ export class RTSCamera {
     this.camera = new THREE.PerspectiveCamera(FOV_DEG, aspect, 1, 10000);
     this.applySettings(settings);
 
-    // Startansicht: ganz Europa
-    const cx = Math.min(2600, geo.widthKm * 0.5), cz = Math.min(2300, geo.heightKm * 0.52);
+    // Startansicht: ganze Karte, zentriert
+    this.recomputeFit(aspect);
+    const cx = geo.widthKm * 0.5, cz = geo.heightKm * 0.5;
     this.goalX = cx;
     this.goalZ = cz;
-    this.goalLnDist = this.lnDist = Math.log(6500);
+    this.goalLnDist = this.lnDist = Math.log(this.fitDist);
     this.target.set(cx, this.groundY(cx, cz), cz);
     this.applyCamera();
+  }
+
+  /** Abstand (km), bei dem die ganze Karte ins Bild passt */
+  get fitDistance(): number {
+    return this.fitDist;
+  }
+
+  /** Zurück zur Gesamtansicht (ganze Karte zentriert) */
+  showWholeMap(animate = true): void {
+    this.focus(this.geo.widthKm * 0.5, this.geo.heightKm * 0.5, this.fitDist, animate);
+    this.autoFit = true;
+  }
+
+  private recomputeFit(aspect: number): void {
+    const t = Math.tan((FOV_DEG * THREE.MathUtils.DEG2RAD) / 2);
+    const sinFar = Math.sin(PITCH_FAR * THREE.MathUtils.DEG2RAD);
+    const a = Math.max(0.3, aspect);
+    // Breite: Kartenbreite / (Sichtbreite pro Abstand); Höhe: geneigte Ansicht streckt die Nord-Süd-Ausdehnung
+    const byW = this.geo.widthKm / (2 * t * a);
+    const byH = (this.geo.heightKm * sinFar) / (2 * t);
+    this.fitDist = Math.max(byW, byH) * FIT_MARGIN;
+    this.lnMax = Math.log(this.fitDist * MAX_ZOOM_OUT);
+    this.lnPitchFar = Math.log(Math.max(MIN_DIST * 4, this.fitDist * PITCH_FAR_FRACTION));
   }
 
   get distance(): number {
@@ -123,6 +155,13 @@ export class RTSCamera {
   setAspect(aspect: number): void {
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
+    this.recomputeFit(aspect);
+    if (this.autoFit && !this.animActive) {
+      this.goalLnDist = this.lnDist = Math.log(this.fitDist);
+      this.applyCamera();
+    } else {
+      this.goalLnDist = this.clampLn(this.goalLnDist);
+    }
   }
 
   applySettings(s: Settings): void {
@@ -133,8 +172,9 @@ export class RTSCamera {
 
   /** Sanfter Flug zu (x, z). distance: optionaler Ziel-Abstand (sonst aktueller). */
   focus(x: number, z: number, distance?: number, animate = true): void {
+    this.autoFit = false;
     const p = this.clampXZ(x, z);
-    const ln1 = distance !== undefined ? clampLn(Math.log(Math.max(distance, 1e-3))) : this.goalLnDist;
+    const ln1 = distance !== undefined ? this.clampLn(Math.log(Math.max(distance, 1e-3))) : this.goalLnDist;
     this.anchorActive = false;
     if (!animate) {
       this.animActive = false;
@@ -158,7 +198,7 @@ export class RTSCamera {
     // Bei weiten Flügen kurz herauszoomen (Bogen), damit man sieht, wohin es geht
     const travel = Math.hypot(this.animX1 - this.animX0, this.animZ1 - this.animZ0);
     const lnTravel = Math.log(Math.max(travel * 0.9, 1e-3));
-    this.animBump = Math.max(0, Math.min(LN_MAX, lnTravel) - Math.max(this.animLn0, this.animLn1));
+    this.animBump = Math.max(0, Math.min(this.lnMax, lnTravel) - Math.max(this.animLn0, this.animLn1));
   }
 
   update(dt: number): void {
@@ -233,6 +273,7 @@ export class RTSCamera {
     }
 
     if (userMoved || wheel !== 0) {
+      this.autoFit = false;
       if (this.animActive) {
         // Benutzereingabe bricht Fly-to ab
         this.animActive = false;
@@ -254,7 +295,7 @@ export class RTSCamera {
 
     // Zoom zum Cursor
     if (wheel !== 0) {
-      this.goalLnDist = clampLn(this.goalLnDist + wheel * Math.log(ZOOM_PER_NOTCH));
+      this.goalLnDist = this.clampLn(this.goalLnDist + wheel * Math.log(ZOOM_PER_NOTCH));
       const m = input.mouse;
       const nx = m.inside ? m.ndcX : 0, ny = m.inside ? m.ndcY : 0;
       if (!this.anchorActive || Math.abs(nx - this.anchorNdcX) > 0.004 || Math.abs(ny - this.anchorNdcY) > 0.004) {
@@ -359,7 +400,7 @@ export class RTSCamera {
   /** Positioniert die Kamera anhand target/yaw/lnDist (Neigung aus Abstand). */
   private applyCamera(): void {
     const dist = Math.exp(this.lnDist);
-    let tp = (this.lnDist - LN_MIN) / (LN_PITCH_FAR - LN_MIN);
+    let tp = (this.lnDist - LN_MIN) / (this.lnPitchFar - LN_MIN);
     tp = tp < 0 ? 0 : tp > 1 ? 1 : tp;
     tp = tp * tp * (3 - 2 * tp);
     this.pitch = (PITCH_NEAR + (PITCH_FAR - PITCH_NEAR) * tp) * THREE.MathUtils.DEG2RAD;
@@ -377,13 +418,17 @@ export class RTSCamera {
     cam.lookAt(this.target);
 
     const near = Math.max(0.02, dist * 0.01);
-    const far = dist * 8 + 3000;
+    const far = dist * 8 + 600;
     if (cam.near !== near || cam.far !== far) {
       cam.near = near;
       cam.far = far;
       cam.updateProjectionMatrix();
     }
     cam.updateMatrixWorld();
+  }
+
+  private clampLn(ln: number): number {
+    return ln < LN_MIN ? LN_MIN : ln > this.lnMax ? this.lnMax : ln;
   }
 
   private groundY(x: number, z: number): number {
@@ -399,7 +444,7 @@ export class RTSCamera {
 
   private readonly clampOut: [number, number] = [0, 0];
   private clampXZ(x: number, z: number): [number, number] {
-    const m = 20;
+    const m = Math.min(20, 0.03 * Math.min(this.geo.widthKm, this.geo.heightKm));
     const W = this.geo.widthKm, H = this.geo.heightKm;
     this.clampOut[0] = x < m ? m : x > W - m ? W - m : x;
     this.clampOut[1] = z < m ? m : z > H - m ? H - m : z;
@@ -407,9 +452,6 @@ export class RTSCamera {
   }
 }
 
-function clampLn(ln: number): number {
-  return ln < LN_MIN ? LN_MIN : ln > LN_MAX ? LN_MAX : ln;
-}
 
 function wrapAngle(a: number): number {
   a = (a + Math.PI) % (Math.PI * 2);

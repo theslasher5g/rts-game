@@ -1,23 +1,38 @@
 import { bus } from '../core/EventBus';
-import type { CountryMeta } from '../core/types';
-import {
-  EXTERNAL_NAMES, getProfile, relationClass, relationLabel, RESOURCE_INFO, START_PROFILES, type StartProfile,
-} from '../game/countryData';
+import { getProfile, getRelation, relationClass, relationLabel, START_PROFILES, type StartProfile } from '../game/countryData';
+import { SCENARIO_NAME, SCENARIO_NATIONS } from '../game/scenario';
 import type { GeoData } from '../world/GeoData';
 import { SettingsPanel } from './SettingsPanel';
 
+const SEED_KEY = 'ww3.seed';
+
+const BRIEFING = [
+  'Kronland ist über die Grenze gerückt. Valdoria und Marenia stehen allein gegen eine Übermacht an Panzern.',
+  'Öl ist die einzige Währung: Jedes Fass bezahlt Produktion und Nachschub – und nur was die Raffinerie erreicht, zählt.',
+  'Halte deine Straßen und Brücken, damit die Tankwagen-Konvois durchkommen.',
+  'Erobere die Ölfelder der Region und sichere sie mit Einheiten.',
+  'Schneide den Nachschub des Gegners ab: Eine gesprengte Brücke hungert eine ganze Armee aus.',
+];
+
 /**
- * Startbildschirm über der laufenden 3D-Karte: Länderliste links, Details rechts.
+ * Startbildschirm für das Szenario: Briefing, drei Nationen-Karten, Kartenseed und Startknopf.
+ * Die Karte läuft dahinter weiter; eine Nationenwahl fokussiert die Kamera auf deren Hauptstadt.
  */
 export class MainMenu {
   private readonly geo: GeoData;
   private readonly layer: HTMLDivElement;
-  private readonly detail: HTMLDivElement;
   private readonly startBtn: HTMLButtonElement;
   private readonly hint: HTMLDivElement;
-  private readonly items = new Map<string, HTMLDivElement>();
+  private readonly seedInput: HTMLInputElement;
+  private readonly cards = new Map<string, HTMLDivElement>();
   private selectedA3: string | null = null;
   private isVisible = false;
+
+  /**
+   * Wird mit dem Seed aufgerufen, wenn „Zufallskarte" / ein neuer Seed bestätigt wird. Solange nichts gesetzt ist,
+   * zeigt das Menü nur den Hinweis „Kartengenerator folgt". Der Lead verdrahtet hier die Kartenneuerzeugung.
+   */
+  onNewMap: ((seed: number) => void) | null = null;
 
   constructor(root: HTMLElement, geo: GeoData) {
     this.geo = geo;
@@ -27,73 +42,91 @@ export class MainMenu {
     const title = div('mm-title');
     const h1 = document.createElement('h1');
     h1.textContent = 'WW3: EUROPE';
-    title.append(h1, div('mm-sub', 'Europa, 2027. Der Frieden ist vorbei.'), div('mm-ver', 'PHASE 1 · KARTE & NATIONEN'));
+    title.append(h1, div('mm-sub', `${geo.meta.scenario?.name ?? SCENARIO_NAME} – Öl ist die einzige Währung.`), div('mm-ver', 'KLEINE KARTE · ECHTES GELÄNDE · ERFUNDENE LÄNDER'));
 
-    // Linke Spalte
-    const left = div('panel mm-left');
-    const lh = div('panel-head');
-    lh.append(span('', 'Nation wählen'), span('muted', `${START_PROFILES.length} spielbar`));
-    const list = div('mm-list scroll');
-    const sorted = START_PROFILES.slice().sort((a, b) => a.name.localeCompare(b.name, 'de'));
-    for (const p of sorted) {
-      const it = div('mm-item');
-      it.tabIndex = 0;
-      it.setAttribute('role', 'button');
-      const flag = span('flag', p.flag);
-      const name = span('mm-name', p.name);
-      const diff = span(`mm-diff diff-${p.difficulty}`, p.difficulty);
-      const meta = div('mm-meta');
-      const sw = span('swatch');
-      sw.style.background = p.color;
-      meta.append(sw, span(`tag tag-${p.bloc}`, p.bloc), span('muted', p.government));
-      it.append(flag, name, diff, meta);
-      it.addEventListener('click', () => this.pick(p.a3));
-      it.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          this.pick(p.a3);
-        }
-      });
-      this.items.set(p.a3, it);
-      list.appendChild(it);
+    // Briefing (links oben)
+    const brief = div('panel mm-brief');
+    const bh = div('panel-head');
+    bh.append(span('', 'Lagebesprechung'), span('muted', SCENARIO_NAME));
+    const bb = div('mm-brief-body');
+    const ul = document.createElement('ul');
+    for (const line of BRIEFING) {
+      const li = document.createElement('li');
+      li.textContent = line;
+      ul.appendChild(li);
     }
-    const foot = div('mm-foot');
+    bb.appendChild(ul);
+    bb.appendChild(div('mm-goal', 'ZIEL: Straßen halten · Ölfelder nehmen · Gegnerischen Nachschub kappen'));
+    brief.append(bh, bb);
+
+    // Karte & Start (rechts oben)
+    const side = div('panel mm-side');
+    const sh = div('panel-head');
+    sh.append(span('', 'Einsatz'), span('muted', 'Karte'));
+    const sb = div('mm-side-body');
+    const seedRow = div('mm-seed');
+    seedRow.append(span('muted', 'KARTEN-SEED'));
+    this.seedInput = document.createElement('input');
+    this.seedInput.className = 'mm-seed-input';
+    this.seedInput.type = 'text';
+    this.seedInput.inputMode = 'numeric';
+    this.seedInput.maxLength = 10;
+    this.seedInput.spellcheck = false;
+    this.seedInput.value = String(this.loadSeed());
+    this.seedInput.addEventListener('change', () => this.commitSeed(true));
+    this.seedInput.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') this.commitSeed(true);
+    });
+    this.seedInput.addEventListener('keyup', (e) => e.stopPropagation());
+    const rnd = document.createElement('button');
+    rnd.className = 'btn';
+    rnd.textContent = '🎲 Zufallskarte';
+    rnd.addEventListener('click', () => {
+      this.seedInput.value = String(Math.floor(Math.random() * 1_000_000));
+      this.commitSeed(true);
+    });
+    seedRow.append(this.seedInput, rnd);
+    const note = div('mm-note', 'Jede Karte hat andere Ölfelder, Straßen und Städte.');
+    this.startBtn = document.createElement('button');
+    this.startBtn.className = 'btn btn-primary';
+    this.startBtn.textContent = '▶ SPIEL STARTEN';
+    this.startBtn.disabled = true;
+    this.startBtn.addEventListener('click', () => this.start());
+    this.hint = div('mm-hint', 'Wähle unten eine Nation.');
     const setBtn = document.createElement('button');
     setBtn.className = 'btn';
     setBtn.textContent = '⚙ Einstellungen';
     setBtn.addEventListener('click', () => SettingsPanel.instance?.toggle());
-    const mpBtn = document.createElement('button');
-    mpBtn.className = 'btn';
-    mpBtn.disabled = true;
-    mpBtn.textContent = 'Multiplayer';
-    foot.append(setBtn, mpBtn, div('mm-note', 'Multiplayer – folgt in Phase 9'));
-    left.append(lh, list, foot);
+    sb.append(seedRow, note, this.startBtn, this.hint, setBtn);
+    side.append(sh, sb);
 
-    // Rechte Spalte
-    const right = div('panel mm-right');
-    const rh = div('panel-head');
-    rh.append(span('', 'Lagebericht'), span('muted', 'Stand: 03/2027'));
-    this.detail = div('mm-detail scroll');
-    const start = div('mm-start');
-    this.startBtn = document.createElement('button');
-    this.startBtn.className = 'btn btn-primary';
-    this.startBtn.textContent = '▶ Spiel starten';
-    this.startBtn.disabled = true;
-    this.startBtn.addEventListener('click', () => this.start());
-    this.hint = div('mm-hint', 'Wähle eine spielbare Nation aus der Liste oder auf der Karte.');
-    start.append(this.startBtn, this.hint);
-    right.append(rh, this.detail, start);
+    // Nationen-Karten (unten)
+    const cards = div('mm-cards');
+    for (const p of START_PROFILES) {
+      if (!SCENARIO_NATIONS.some((n) => n.a3 === p.a3 && n.playable)) continue;
+      const card = this.buildCard(p);
+      this.cards.set(p.a3, card);
+      cards.appendChild(card);
+    }
 
-    this.layer.append(title, left, right);
+    this.layer.append(title, brief, side, cards);
     root.appendChild(this.layer);
-    this.renderEmpty();
 
-    bus.on('country:select', ({ id }) => this.onSelect(id));
+    // Anklicken eines Landes auf der Karte wählt die Nation ebenfalls
+    bus.on('country:select', ({ id }) => {
+      const c = this.geo.countriesById.get(id);
+      if (c && getProfile(c.a3) && this.isVisible) this.setSelected(c.a3);
+    });
   }
 
   get visible(): boolean {
     return this.isVisible;
+  }
+
+  /** aktueller Kartenseed (Zahl) */
+  get seed(): number {
+    return this.parseSeed(this.seedInput.value);
   }
 
   show(): void {
@@ -106,231 +139,127 @@ export class MainMenu {
     this.isVisible = false;
   }
 
-  private pick(a3: string): void {
-    const c = this.geo.countriesByA3.get(a3);
-    if (!c) {
-      // Land nicht im Kartenausschnitt – trotzdem anzeigen
-      this.showProfile(a3, undefined);
-      return;
+  // ------------------------------------------------------------------ intern
+
+  private loadSeed(): number {
+    try {
+      const v = localStorage.getItem(SEED_KEY);
+      if (v !== null) return this.parseSeed(v);
+    } catch {
+      /* kein localStorage */
     }
-    bus.emit('country:select', { id: c.id });
-    bus.emit('camera:focus', { x: c.label[0], z: c.label[1], distance: focusDistance(c) });
+    return this.geo.meta.scenario?.seed ?? 1;
   }
 
-  private start(): void {
-    if (!this.selectedA3 || !getProfile(this.selectedA3)) return;
-    bus.emit('game:start', { countryA3: this.selectedA3 });
-    this.hide();
+  private parseSeed(v: string): number {
+    const n = Math.floor(Number(v.trim()));
+    return Number.isFinite(n) && n >= 0 ? n % 4_294_967_295 : this.geo.meta.scenario?.seed ?? 1;
   }
 
-  private onSelect(id: number): void {
-    const c = this.geo.countriesById.get(id);
-    if (!c) {
-      this.setSelected(null);
-      this.renderEmpty();
-      return;
+  private commitSeed(announce: boolean): void {
+    const seed = this.parseSeed(this.seedInput.value);
+    this.seedInput.value = String(seed);
+    try {
+      localStorage.setItem(SEED_KEY, String(seed));
+    } catch {
+      /* ignorieren */
     }
-    this.showProfile(c.a3, c);
+    if (!announce) return;
+    if (this.onNewMap) this.onNewMap(seed);
+    else bus.emit('toast', { msg: `Seed ${seed} gespeichert – Kartengenerator folgt`, kind: 'info' });
   }
 
-  private showProfile(a3: string, c: CountryMeta | undefined): void {
-    const p = getProfile(a3);
-    if (p) {
-      this.setSelected(a3);
-      this.renderProfile(p);
-    } else if (c) {
-      this.setSelected(null);
-      this.renderAi(c);
-    }
-  }
+  private buildCard(p: StartProfile): HTMLDivElement {
+    const card = div('mm-card');
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.style.setProperty('--nation', p.color);
 
-  private setSelected(a3: string | null): void {
-    if (this.selectedA3 && this.selectedA3 !== a3) this.items.get(this.selectedA3)?.classList.remove('active');
-    this.selectedA3 = a3;
-    const it = a3 ? this.items.get(a3) : undefined;
-    if (it) {
-      it.classList.add('active');
-      it.scrollIntoView({ block: 'nearest' });
-    }
-    const ok = !!a3 && !!getProfile(a3);
-    this.startBtn.disabled = !ok;
-    const name = a3 ? getProfile(a3)?.name : undefined;
-    this.hint.textContent = ok && name ? `Kommando übernehmen: ${name}` : 'Wähle eine spielbare Nation aus der Liste oder auf der Karte.';
-  }
-
-  private renderEmpty(): void {
-    this.detail.replaceChildren(div('cd-empty', 'KEINE NATION GEWÄHLT\n\nWähle links eine Nation oder klicke ein Land auf der Karte an.'));
-    (this.detail.firstChild as HTMLElement).style.whiteSpace = 'pre-line';
-  }
-
-  private renderAi(c: CountryMeta): void {
-    const d = this.detail;
-    d.replaceChildren();
-    const head = div('cd-head');
+    const head = div('mc-head');
     const txt = div('');
-    txt.append(div('cd-name', c.name));
-    const sub = div('cd-sub');
-    sub.append(span('', c.nameEn), span('muted', `· ${c.a3}`));
-    txt.append(sub);
-    head.append(span('flag', '⚑'), txt);
-    d.append(head, div('cd-ai', 'KI-Nation – nicht spielbar in Phase 1'));
-    d.append(sectTitle('Eckdaten'));
-    const kv = div('kv');
-    addKv(kv, 'Bevölkerung', c.population > 0 ? `${fmtNum(c.population / 1e6, 1)} Mio.` : '—');
-    addKv(kv, 'BIP', c.gdpMd > 0 ? `${fmtInt(c.gdpMd / 1000)} Mrd $` : '—');
-    addKv(kv, 'Fläche (ca.)', `${fmtInt(c.cells * this.geo.cellKm * this.geo.cellKm)} km²`);
-    d.append(kv);
-  }
+    txt.append(div('mc-name', p.name), div('mc-sub', `${p.government} · ${p.leaderTitle}`));
+    head.append(span('flag mc-flag', p.flag), txt, span(`mm-diff diff-${p.difficulty}`, p.difficulty));
+    card.appendChild(head);
+    card.appendChild(div('mc-blurb', p.blurb));
 
-  private renderProfile(p: StartProfile): void {
-    const d = this.detail;
-    d.replaceChildren();
-
-    // Kopf
-    const head = div('cd-head');
-    const txt = div('');
-    txt.append(div('cd-name', p.name));
-    const sub = div('cd-sub');
-    const sw = span('swatch');
-    sw.style.background = p.color;
-    sub.append(sw, span(`tag tag-${p.bloc}`, p.bloc), span('', p.government), span('muted', `· ${p.leaderTitle}`));
-    txt.append(sub);
-    head.append(span('flag', p.flag), txt);
-    d.append(head);
-
-    const diffRow = div('cd-sub');
-    diffRow.append(span('muted', 'Schwierigkeit:'), span(`diff-${p.difficulty}`, p.difficulty.toUpperCase()));
-    d.append(diffRow);
-
-    // Staat & Wirtschaft
-    d.append(sectTitle('Staat & Wirtschaft'));
-    const kv = div('kv');
-    addKv(kv, 'Bevölkerung', `${fmtNum(p.population, 1)} Mio.`);
-    addKv(kv, 'BIP', `${fmtInt(p.gdp)} Mrd $`);
-    addKv(kv, 'BIP pro Kopf', `${fmtInt((p.gdp * 1000) / p.population)} $`);
-    addKv(kv, 'Staatsschulden', `${p.debtPct} % BIP`, p.debtPct > 100 ? 'neg' : '');
-    addKv(kv, 'Inflation', `${fmtNum(p.inflation, 1)} %`, p.inflation > 6 ? 'neg' : '');
-    addKv(kv, 'Zufriedenheit', `${p.zufriedenheit} / 100`, p.zufriedenheit < 45 ? 'neg' : p.zufriedenheit >= 60 ? 'pos' : '');
-    d.append(kv);
-    const meter = div('meter');
-    const mi = document.createElement('i');
-    mi.style.width = `${p.zufriedenheit}%`;
-    mi.style.background = p.zufriedenheit < 45 ? 'var(--bad)' : p.zufriedenheit >= 60 ? 'var(--good)' : 'var(--amber)';
-    meter.appendChild(mi);
-    d.append(meter);
-
-    // Militär
-    d.append(sectTitle(`Militär · ${fmtNum(p.militaryBudget, 1)} Mrd $/Jahr`));
     const mil = div('cd-mil');
-    const milCell = (v: string, k: string) => {
+    const cell = (v: string, k: string) => {
       const c = div('');
       c.append(span('v', v), span('k', k));
       mil.appendChild(c);
     };
-    milCell(`${fmtInt(p.manpower)}k`, 'Soldaten');
-    milCell(fmtInt(p.tanks), 'Panzer');
-    milCell(fmtInt(p.ifv), 'SPz');
-    milCell(fmtInt(p.artillery), 'Artillerie');
-    milCell(fmtInt(p.aircraft), 'Flugzeuge');
-    milCell(fmtInt(p.helicopters), 'Hubschr.');
-    milCell(fmtInt(p.ships), 'Schiffe');
-    milCell(fmtInt(p.drones), 'Drohnen');
-    d.append(mil);
+    cell(String(Math.round(p.manpower)) + 'k', 'Soldaten');
+    cell(String(p.tanks), 'Panzer');
+    cell(String(p.ifv), 'SPz');
+    cell(String(p.artillery), 'Artillerie');
+    card.append(div('sect-title', 'Startstreitkräfte'), mil);
 
-    // Ressourcen
-    d.append(sectTitle('Ressourcen pro Tag'));
-    const legend = div('res-legend');
-    const lp = span('');
-    const lpi = document.createElement('i');
-    lpi.style.background = '#7fae58';
-    lp.append(lpi, document.createTextNode('Produktion'));
-    const lc = span('');
-    const lci = document.createElement('i');
-    lci.style.background = '#c27a3a';
-    lc.append(lci, document.createTextNode('Verbrauch'));
-    legend.append(lp, lc);
-    d.append(legend);
-    for (const r of RESOURCE_INFO) {
-      const prod = p.production[r.key], cons = p.consumption[r.key];
-      const max = Math.max(prod, cons, 1e-9);
-      const row = div('res-row');
-      row.title = `${r.name}: Produktion ${fmtNum(prod, prod < 10 ? 2 : 0)} / Verbrauch ${fmtNum(cons, cons < 10 ? 2 : 0)} ${r.unit} pro Tag · Lager ${fmtNum(p.stock[r.key], 0)} ${r.unit}`;
-      const name = span('res-name', `${r.icon} ${r.name}`);
-      const bars = div('res-bars');
-      const bp = div('bar p');
-      const bpi = document.createElement('i');
-      bpi.style.width = `${(prod / max) * 100}%`;
-      bp.appendChild(bpi);
-      const bc = div('bar c');
-      const bci = document.createElement('i');
-      bci.style.width = `${(cons / max) * 100}%`;
-      bc.appendChild(bci);
-      bars.append(bp, bc);
-      const ratio = cons > 0 ? prod / cons : prod > 0 ? 99 : 1;
-      let state: string, cls: string;
-      if (ratio >= 1.05) { state = 'Überschuss'; cls = 'pos'; }
-      else if (ratio >= 0.95) { state = 'Ausgegl.'; cls = 'muted'; }
-      else if (ratio >= 0.5) { state = 'Defizit'; cls = 'amber'; }
-      else { state = 'Engpass'; cls = 'neg'; }
-      row.append(name, bars, span(`res-state ${cls}`, state));
-      d.append(row);
+    const rel = div('mc-rel');
+    for (const o of START_PROFILES) {
+      if (o.a3 === p.a3) continue;
+      const v = getRelation(p.a3, o.a3);
+      rel.append(span('', `${o.flag} ${o.short}`), span(relationClass(v), relationLabel(v)));
     }
+    card.append(div('sect-title', 'Lage'), rel);
 
-    // Bündnisse & Handel
-    d.append(sectTitle('Verbündete'));
-    d.append(chips(p.allies.map((a) => this.nameOf(a))));
-    d.append(sectTitle('Handelspartner'));
-    d.append(chips(p.tradePartners.map((a) => this.nameOf(a))));
+    card.append(div('sect-title', 'Stärken'), bullets(p.strengths.slice(0, 2), false));
+    card.append(div('sect-title', 'Schwächen'), bullets(p.weaknesses.slice(0, 2), true));
 
-    // Beziehungen
-    d.append(sectTitle('Beziehungen'));
-    const rel = div('rel-list');
-    const entries = Object.entries(p.relations).sort((a, b) => b[1] - a[1]);
-    for (const [a3, v] of entries) {
-      rel.append(span('', this.nameOf(a3)), span(`rv ${relationClass(v)}`, v > 0 ? `+${v}` : String(v)), span(relationClass(v), relationLabel(v)));
-    }
-    d.append(rel);
-
-    // Stärken / Schwächen
-    d.append(sectTitle('Stärken'));
-    d.append(bullets(p.strengths, false));
-    d.append(sectTitle('Schwächen'));
-    d.append(bullets(p.weaknesses, true));
-    d.scrollTop = 0;
+    card.addEventListener('click', () => this.pick(p.a3));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.pick(p.a3);
+      }
+    });
+    return card;
   }
 
-  private nameOf(a3: string): string {
-    return getProfile(a3)?.name ?? this.geo.countriesByA3.get(a3)?.name ?? EXTERNAL_NAMES[a3] ?? a3;
+  private pick(a3: string): void {
+    this.setSelected(a3);
+    const c = this.geo.countriesByA3.get(a3);
+    if (c) bus.emit('country:select', { id: c.id });
+    const [x, z] = this.capitalPos(a3);
+    bus.emit('camera:focus', { x, z, distance: 90 });
   }
-}
 
-/** Kameradistanz zum Einrahmen eines Landes */
-function focusDistance(c: CountryMeta): number {
-  return Math.min(4200, Math.max(450, Math.sqrt(c.cells * 4) * 2.2));
-}
+  /** Hauptstadtposition (km): Szenariodaten, sonst Hauptstadt aus den Städten, sonst Länder-Label */
+  private capitalPos(a3: string): [number, number] {
+    const m = this.geo.meta;
+    const st = m.scenario?.nations.find((n) => n.a3 === a3);
+    const city = st ? m.cities[st.capitalCity] : m.cities.find((c) => c.country === a3 && c.capital);
+    if (city) return [city.pos[0], city.pos[1]];
+    const c = this.geo.countriesByA3.get(a3);
+    return c ? [c.label[0], c.label[1]] : [this.geo.widthKm / 2, this.geo.heightKm / 2];
+  }
 
-function sectTitle(t: string): HTMLDivElement {
-  return div('sect-title', t);
-}
+  private setSelected(a3: string | null): void {
+    if (this.selectedA3 && this.selectedA3 !== a3) this.cards.get(this.selectedA3)?.classList.remove('active');
+    this.selectedA3 = a3;
+    this.cards.get(a3 ?? '')?.classList.add('active');
+    const p = a3 ? getProfile(a3) : undefined;
+    this.startBtn.disabled = !p;
+    this.hint.textContent = p ? `Kommando übernehmen: ${p.name}` : 'Wähle unten eine Nation.';
+  }
 
-function addKv(kv: HTMLElement, k: string, v: string, cls = ''): void {
-  kv.append(span('', k), span(cls, v));
-}
-
-function chips(items: string[]): HTMLDivElement {
-  const c = div('chips');
-  for (const t of items) c.appendChild(span('chip', t));
-  return c;
+  private start(): void {
+    if (!this.selectedA3 || !getProfile(this.selectedA3)) return;
+    this.commitSeed(false);
+    bus.emit('game:start', { countryA3: this.selectedA3 });
+    this.hide();
+  }
 }
 
 function bullets(items: string[], negative: boolean): HTMLUListElement {
   const ul = document.createElement('ul');
   ul.className = negative ? 'bullets neg-list' : 'bullets';
-  for (const t of items) {
+  items.forEach((t, i) => {
     const li = document.createElement('li');
     li.textContent = t;
+    if (i > 0) li.className = 'mc-more';
     ul.appendChild(li);
-  }
+  });
   return ul;
 }
 
@@ -346,12 +275,4 @@ function span(cls: string, text?: string): HTMLSpanElement {
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
-}
-
-const NF0 = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 0 });
-function fmtInt(v: number): string {
-  return NF0.format(Math.round(v));
-}
-function fmtNum(v: number, digits: number): string {
-  return v.toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }

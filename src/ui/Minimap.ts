@@ -1,7 +1,9 @@
 import { bus } from '../core/EventBus';
+import { WATER_LAKE, WATER_RIVER } from '../core/types';
+import { getProfile } from '../game/countryData';
 import type { GeoData } from '../world/GeoData';
 
-const MM_WIDTH = 260;
+const MM_WIDTH = 300;
 
 /** Gedämpfte Landtöne je MAPCOLOR9 (1..9) */
 const TINTS: Array<[number, number, number]> = [
@@ -32,6 +34,12 @@ export class Minimap {
   private selectedId = -1;
   private playerId = -1;
   private lastFp = new Float64Array(8).fill(NaN);
+  /** 1 = See, 2 = Fluss je Minimap-Pixel (aus allen Rasterzellen des Pixels) */
+  private readonly water: Uint8Array;
+  /** Besitzer (a3) je Ölfeld-ID; Startwert = Land, in dem das Feld liegt */
+  private readonly oilOwner = new Map<number, string>();
+  private markersDirty = true;
+  private playerA3 = '';
   private dragging = false;
 
   constructor(root: HTMLElement, geo: GeoData) {
@@ -73,6 +81,7 @@ export class Minimap {
     this.ids = new Uint8Array(n);
     this.baseRgb = new Uint8ClampedArray(n * 3);
     this.border = new Uint8Array(n);
+    this.water = new Uint8Array(n);
     const sx = geo.width / this.w, sy = geo.height / this.h;
     const heights = new Float32Array(n);
     for (let j = 0; j < this.h; j++) {
@@ -82,6 +91,24 @@ export class Minimap {
         const k = gj * geo.width + gi;
         this.ids[j * this.w + i] = geo.countryIds[k];
         heights[j * this.w + i] = geo.heightsKm[k];
+      }
+    }
+    // Flüsse/Seen: jeder Fluss-Treffer im Pixelblock zählt (sonst verschwinden dünne Flüsse beim Verkleinern)
+    const bx = Math.max(1, Math.round(sx)), by = Math.max(1, Math.round(sy));
+    for (let j = 0; j < this.h; j++) {
+      const g0 = Math.floor(j * sy);
+      for (let i = 0; i < this.w; i++) {
+        const h0 = Math.floor(i * sx);
+        let rivers = 0, lakes = 0;
+        for (let dj = 0; dj < by; dj++) {
+          const gj = Math.min(geo.height - 1, g0 + dj);
+          for (let di = 0; di < bx; di++) {
+            const f = geo.waterFlags[gj * geo.width + Math.min(geo.width - 1, h0 + di)];
+            if (f & WATER_RIVER) rivers++;
+            else if (f & WATER_LAKE) lakes++;
+          }
+        }
+        this.water[j * this.w + i] = lakes > (bx * by) / 2 ? 1 : rivers > 0 ? 2 : 0;
       }
     }
     for (let j = 0; j < this.h; j++) {
@@ -95,7 +122,8 @@ export class Minimap {
           r = 18 - d * 8; g = 34 - d * 14; b = 52 - d * 16;
         } else {
           const meta = geo.countriesById.get(id);
-          const tint = TINTS[meta ? meta.mapColor : 0] ?? TINTS[0];
+          const prof = meta ? getProfile(meta.a3) : undefined;
+          const tint = prof ? mixTint(prof.color) : TINTS[meta ? meta.mapColor : 0] ?? TINTS[0];
           // einfache Schattierung: Höhe + Hangneigung (Licht aus NW)
           const hw = heights[p - 1 >= j * this.w ? p - 1 : p];
           const hn = heights[j > 0 ? p - this.w : p];
@@ -106,6 +134,8 @@ export class Minimap {
           b = (tint[2] * (1 - lift) + 140 * lift) * shade * 0.8;
           if (id === 0) { r *= 0.7; g *= 0.7; b *= 0.7; }
         }
+        const wt = this.water[p];
+        if (wt === 1) { r = 40; g = 70; b = 105; } else if (wt === 2) { r = 70; g = 120; b = 170; }
         this.baseRgb[p * 3] = r;
         this.baseRgb[p * 3 + 1] = g;
         this.baseRgb[p * 3 + 2] = b;
@@ -115,6 +145,15 @@ export class Minimap {
       }
     }
     this.renderBase(0, 0);
+
+    for (const f of geo.meta.scenario?.oilFields ?? []) {
+      const c = geo.countriesById.get(geo.countryAt(f.pos[0], f.pos[1]));
+      this.oilOwner.set(f.id, c?.a3 ?? f.country);
+    }
+    bus.on('oil:field-captured', (e) => {
+      this.oilOwner.set(e.fieldId, e.by);
+      this.markersDirty = true;
+    });
 
     // --- Eingabe
     const focusAt = (e: PointerEvent) => {
@@ -153,7 +192,11 @@ export class Minimap {
   }
 
   update(footprint: Array<[number, number]>, selectedId: number, playerId: number): void {
-    if (selectedId !== this.selectedId || playerId !== this.playerId) this.renderBase(selectedId, playerId);
+    if (selectedId !== this.selectedId || playerId !== this.playerId) {
+      this.renderBase(selectedId, playerId);
+      this.playerA3 = this.geo.countriesById.get(playerId)?.a3 ?? '';
+      this.markersDirty = true;
+    }
 
     // Overlay nur bei Änderung neu zeichnen
     let changed = false;
@@ -167,10 +210,12 @@ export class Minimap {
         fp[k * 2 + 1] = p[1];
       }
     }
-    if (!changed) return;
+    if (!changed && !this.markersDirty) return;
+    this.markersDirty = false;
 
     const ctx = this.octx;
     ctx.clearRect(0, 0, this.w, this.h);
+    this.drawMarkers(ctx);
     if (n < 3) return;
     const kx = this.w / this.geo.widthKm, kz = this.h / this.geo.heightKm;
     ctx.beginPath();
@@ -186,6 +231,34 @@ export class Minimap {
     ctx.strokeStyle = '#ffd27a';
     ctx.lineWidth = 1;
     ctx.stroke();
+  }
+
+  /** Ölfelder (Tropfen-Punkt, Rand in Besitzerfarbe) und Basis des Spielers (Quadrat) */
+  private drawMarkers(ctx: CanvasRenderingContext2D): void {
+    const sc = this.geo.meta.scenario;
+    if (!sc) return;
+    const kx = this.w / this.geo.widthKm, kz = this.h / this.geo.heightKm;
+    for (const f of sc.oilFields) {
+      const x = Math.round(f.pos[0] * kx), y = Math.round(f.pos[1] * kz);
+      const owner = this.oilOwner.get(f.id) ?? '';
+      ctx.fillStyle = ownerColor(owner, '#8b876f');
+      ctx.fillRect(x - 3, y - 3, 7, 7);
+      ctx.fillStyle = '#14110c';
+      ctx.fillRect(x - 2, y - 2, 5, 5);
+      ctx.fillStyle = '#ffc75a';
+      ctx.fillRect(x - 1, y - 1, 3, 3);
+      ctx.fillRect(x, y - 2, 1, 1);
+    }
+    const home = sc.nations.find((n) => n.a3 === this.playerA3);
+    if (home) {
+      const x = Math.round(home.hq[0] * kx), y = Math.round(home.hq[1] * kz);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(x - 5, y - 5, 11, 11);
+      ctx.fillStyle = ownerColor(home.a3, '#fff');
+      ctx.fillRect(x - 4, y - 4, 9, 9);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(x - 1, y - 1, 3, 3);
+    }
   }
 
   private renderBase(selectedId: number, playerId: number): void {
@@ -216,4 +289,14 @@ export class Minimap {
 
 function clamp(v: number, a: number, b: number): number {
   return v < a ? a : v > b ? b : v;
+}
+
+/** Landton: Mischung aus gedämpftem Gelände-Grün/Braun und Teamfarbe (Teamfarbe bleibt erkennbar) */
+function mixTint(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return [100 * 0.7 + r * 0.3, 108 * 0.7 + g * 0.3, 88 * 0.7 + b * 0.3];
+}
+
+function ownerColor(a3: string, fallback: string): string {
+  return getProfile(a3)?.color ?? fallback;
 }

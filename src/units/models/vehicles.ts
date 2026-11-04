@@ -260,6 +260,25 @@ export function buildTruck(): ModelDef {
   return { geom: b.build({ groundAO: 0.35, groundH: 1.0 }), size: 8, boost: 1, livery: 'ground', tilt: true };
 }
 
+// -------------------------------------------------------------------------- Tankwagen (Phase 5: Öltransport)
+
+export function buildFuelTruck(): ModelDef {
+  const b = new ModelBuilder();
+  truckChassis(b, { zs: [-2.4, 1.2, 2.6], halfTrack: 1.0, R: 0.5, w: 0.38, cabZ: -2.7, frameL: 7.6, frameZ: 0.1, cabH: 1.7 });
+  b.box(1.5, 0.05, 1.0, 0, 2.85, -2.6, 0xffffff, { paint: P_TEAM, ao: 0 });
+  // Zylindrischer Tank auf dem Rahmen, Querringe, Domdeckel, Heckarmaturen
+  b.cyl(1.0, 5.4, 0, 2.35, 1.5, 'z', 0xb8bcbe, { paint: P_FIXED, ao: 0.2 }, 10);
+  for (const z of [-0.5, 1.5, 3.5]) b.cyl(1.04, 0.14, 0, 2.35, z, 'z', 0x6a6e70, { paint: P_FIXED }, 10);
+  b.box(0.8, 0.28, 0.8, 0, 3.42, 0.6, 0x5a5e60, { paint: P_FIXED });
+  b.box(0.8, 0.28, 0.8, 0, 3.42, 2.4, 0x5a5e60, { paint: P_FIXED });
+  // Teamband (Team-Farbe) längs oben, Warnstreifen hinten
+  b.box(0.5, 0.05, 4.8, 0, 3.38, 1.5, 0xffffff, { paint: P_TEAM, ao: 0 });
+  b.box(2.1, 0.5, 0.1, 0, 1.55, 4.3, 0xd8b030, { paint: P_FIXED });
+  b.cyl(0.08, 1.2, 0.5, 1.2, 4.25, 'x', DARK, { paint: P_FIXED }, 5); // Schlauchrolle
+  b.lathe([[0.45, -0.16], [0.45, 0.16], [0.2, 0.2], [0, 0.2]], 'z', 0, 1.1, 4.5, TIRE, { paint: P_FIXED, seg: 7, edgeColors: [TIRE, TIRE, HUB] });
+  return { geom: b.build({ groundAO: 0.35, groundH: 1.0 }), size: 8, boost: 1, livery: 'ground', tilt: true };
+}
+
 // -------------------------------------------------------------------------- Hilfskonvoi-LKW (weiß/blau, rotes Kreuz)
 
 function aidMarkings(b: ModelBuilder, bodyW: number, z0: number, z1: number, y: number): void {

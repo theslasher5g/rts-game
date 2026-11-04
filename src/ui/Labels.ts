@@ -32,6 +32,8 @@ interface Label {
 
 const MAX_RECTS = 512;
 const BASE_COUNTRY_PX = 16;
+/** Referenz-Kartengröße (km): auf die kleine Szenario-Karte (≈ 300 × 200) sind alle Schwellen abgestimmt */
+const REF_SPAN_KM = 330;
 
 /**
  * HTML-Beschriftungen für Länder und Städte, pro Frame projiziert.
@@ -51,6 +53,9 @@ export class Labels {
     this.geo = geo;
     this.settings = settings;
 
+    // Schwellen in km für die 300×200-Karte; größere Karten skalieren (gedeckelt) mit
+    const span = Math.max(geo.widthKm, geo.heightKm);
+    const k = clamp(span / REF_SPAN_KM, 1, 4);
     const frag = document.createDocumentFragment();
     for (const c of geo.meta.countries) {
       if (c.cells < 4) continue;
@@ -64,8 +69,9 @@ export class Labels {
       this.labels.push({
         el, kind: 'country', id: c.id, capital: false,
         wx: c.label[0], wz: c.label[1], pos: new THREE.Vector3(),
-        maxDist: clamp(sizeKm * 14, 350, 20000),
-        minDist: sizeKm * 0.35,
+        // Ländernamen: schon aus der Gesamtansicht (und weiter weg) sichtbar, erst aus sehr großer Nähe ausgeblendet
+        maxDist: span * 2.5,
+        minDist: sizeKm * 0.3,
         sizeKm,
         w: len * BASE_COUNTRY_PX * (0.55 + 0.32) + 4,
         h: BASE_COUNTRY_PX * 1.25,
@@ -80,16 +86,17 @@ export class Labels {
       el.textContent = city.name;
       el.style.display = 'none';
       frag.appendChild(el);
-      const px = city.capital ? 12 : 11;
+      const px = city.capital ? 13 : 11;
       this.labels.push({
         el, kind: 'city', id: 0, capital: city.capital,
         wx: city.pos[0], wz: city.pos[1], pos: new THREE.Vector3(),
-        maxDist: city.capital ? 3500 : Math.min(1200, 450 + (city.pop / 1e6) * 250),
+        // Hauptstädte immer (auch Gesamtansicht); Städte ab 15k unter ~150 km, größere früher, Dörfer nur nah
+        maxDist: city.capital ? span * 2.5 : (city.pop >= 100_000 ? 260 : city.pop >= 15_000 ? 150 : 60) * k,
         minDist: 0,
         sizeKm: 0,
         w: city.name.length * px * 0.6 + 12,
         h: px * 1.3,
-        basePriority: (city.capital ? 500_000 : 0) + Math.min(city.pop / 100, 400_000),
+        basePriority: (city.capital ? 900_000 : 0) + Math.min(city.pop / 100, 400_000),
         priority: 0,
         shown: false, lastOpacity: -1, lastX: NaN, lastY: NaN, lastScale: NaN,
       });
@@ -147,7 +154,7 @@ export class Labels {
             y = (-this.tmp.y * halfH) + halfH;
             if (L.kind === 'country') {
               const px = (L.sizeKm / dist) * pxPerUnit * 0.09;
-              scale = clamp(px, 10, 30) / BASE_COUNTRY_PX;
+              scale = clamp(px, 10, 26) / BASE_COUNTRY_PX;
               // Ein- und Ausblenden an den Grenzen
               const fadeFar = clamp((maxD - dist) / (maxD * 0.25), 0, 1);
               const fadeNear = L.minDist > 0 ? clamp((dist - L.minDist) / (L.minDist * 0.6), 0, 1) : 1;

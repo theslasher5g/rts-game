@@ -112,6 +112,10 @@ const DEFS: Record<string, Def> = {
   supply_truck: def('Versorgungs-LKW', 'Vers', 'support', 'truck', 4, MOB.truck(85, 18), 0.15,
     { armor: 5, hp: 100, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 0, fuelKm: 1000, cost: 3 }),
 
+  // --- Phase 5: Tankwagen-Konvoi (Öltransport, unbewaffnet, Ladung 120 Fässer; Fracht wird von OilEconomy verwaltet)
+  tanker_truck: def('Tankwagen-Konvoi', 'Tank', 'support', 'fuel_truck', 3, MOB.truck(70, 15), 0.15,
+    { armor: 5, hp: 140, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 0, fuelKm: 1200, cost: 25 }),
+
   // --- Humanitär / Sanität (unbewaffnet)
   aid_convoy: def('Hilfskonvoi', 'Hilfe', 'support', 'aid_truck', 4, MOB.truck(80, 12), 0.15,
     { armor: 3, hp: 120, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 10, fuelKm: 1000, cost: 2 }),

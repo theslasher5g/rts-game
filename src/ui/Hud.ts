@@ -1,5 +1,5 @@
 import { bus } from '../core/EventBus';
-import { blocOf, getProfile, getRelation, relationClass, relationLabel, RESOURCE_INFO, type ResourceKey } from '../game/countryData';
+import { blocOf, getProfile, getRelation, relationClass, relationLabel } from '../game/countryData';
 import type { GameState } from '../game/GameState';
 import { SPEED_LABELS } from '../game/GameState';
 import type { GeoData } from '../world/GeoData';
@@ -8,26 +8,19 @@ import { SettingsPanel } from './SettingsPanel';
 const MONTHS = ['Jan.', 'Feb.', 'März', 'Apr.', 'Mai', 'Juni', 'Juli', 'Aug.', 'Sep.', 'Okt.', 'Nov.', 'Dez.'];
 const REFRESH_INTERVAL = 0.25;
 
-const TABS: Array<{ id: string; title: string; phase: string; items: string[] }> = [
-  { id: 'wirtschaft', title: 'Wirtschaft', phase: 'Phase 5', items: ['Haushalt & Steuern', 'Industrieproduktion', 'Fabriken & Infrastruktur'] },
-  { id: 'handel', title: 'Handel', phase: 'Phase 6', items: ['Handelsabkommen', 'Rohstoffmärkte', 'Embargos & Sanktionen'] },
-  { id: 'diplomatie', title: 'Diplomatie', phase: 'Phase 7', items: ['Bündnisse', 'Verträge', 'Kriegserklärungen'] },
-  { id: 'militaer', title: 'Militär', phase: 'Phase 2–3', items: ['Einheiten & Verbände', 'Rekrutierung', 'Taktische Gefechte'] },
-  { id: 'forschung', title: 'Forschung', phase: 'Phase 10', items: ['Technologiebaum', 'Rüstungsprojekte', 'Doktrinen'] },
-];
-
-interface ResCell {
-  key: ResourceKey;
-  root: HTMLDivElement;
-  v: HTMLSpanElement;
-  d: HTMLSpanElement;
-  lastV: string;
-  lastD: string;
+interface TabInfo {
+  id: string;
+  title: string;
+  el: HTMLElement;
+  btn: HTMLButtonElement;
+  onToggle?: (open: boolean) => void;
 }
 
+const OIL_ICON = '<svg viewBox="0 0 16 20" width="16" height="20" aria-hidden="true"><path d="M8 1 C8 1 2 8.5 2 12.5 A6 6 0 0 0 14 12.5 C14 8.5 8 1 8 1 Z" fill="#14110c" stroke="#e3a534" stroke-width="1.4"/><path d="M5.2 12.2 A3 3 0 0 0 8 15.2" fill="none" stroke="#e3a534" stroke-width="1.2" stroke-linecap="round"/></svg>';
+
 /**
- * In-Game-HUD: Kopfleiste (Nation, Datum, Geschwindigkeit, Ressourcen),
- * Infopanel unten rechts, Platzhalter-Reiter rechts und Pause-Menü.
+ * In-Game-HUD (Phase 5): Kopfleiste (Nation, Datum, Geschwindigkeit, Zufriedenheit), Ölanzeige (einzige Währung),
+ * Slot `#hud-supply` für Versorgungsübersicht, Infopanel unten rechts, Reiter rechts (`registerTab`) und Pause-Menü.
  * Hinweis: `update()` aktualisiert nur die Anzeige – `GameState.update()` ruft main.ts auf.
  */
 export class Hud {
@@ -41,14 +34,22 @@ export class Hud {
   private readonly speedBtns: HTMLButtonElement[] = [];
   private readonly zufVal: HTMLElement;
   private readonly zufBar: HTMLElement;
-  private readonly res: ResCell[] = [];
+  private readonly oilBar: HTMLDivElement;
+  private readonly oilVal: HTMLElement;
+  private readonly oilIncome: HTMLElement;
+  private readonly oilSpend: HTMLElement;
+  private readonly oilTransit: HTMLElement;
+  private lastOil = '';
+  /** Von außen gesetzter Info-Override (Ölfeld, Stadt, Basis …) */
+  private entityInfo: { title: string; rows: Array<[string, string]> } | null = null;
   private readonly info: HTMLDivElement;
   private readonly infoBody: HTMLDivElement;
   private readonly infoMode: HTMLSpanElement;
   private readonly drawer: HTMLDivElement;
   private readonly drawerTitle: HTMLSpanElement;
   private readonly drawerBody: HTMLDivElement;
-  private readonly tabBtns = new Map<string, HTMLButtonElement>();
+  private readonly tabs = new Map<string, TabInfo>();
+  private readonly tabsEl: HTMLDivElement;
   private readonly pauseBackdrop: HTMLDivElement;
 
   private isVisible = false;
@@ -109,29 +110,33 @@ export class Hud {
     right.append(zuf, menuBtn);
     bar.append(nation, time, right);
 
-    // Ressourcenleiste
-    const resBar = div('panel hud-res');
-    for (const r of RESOURCE_INFO) {
-      const cell = div('res');
-      cell.title = `${r.name} – Lagerbestand und Netto pro Tag (${r.unit})`;
-      const k = span('res-k');
-      k.append(span('ic', r.icon), document.createTextNode(r.short));
-      const v = span('res-v', '—');
-      const d = span('res-d', '');
-      cell.append(k, v, d);
-      resBar.appendChild(cell);
-      this.res.push({ key: r.key, root: cell, v, d, lastV: '', lastD: '' });
-    }
-    top.append(bar, resBar);
+    // Ölleiste (einzige Währung) + Slot für Nachschubübersicht
+    this.oilBar = div('panel hud-oil');
+    const oilMain = div('oil-main');
+    oilMain.title = 'Öl ist die einzige Währung: Produktion und Nachschub kosten Fässer. Konvois liefern über das Straßennetz.';
+    const ic = span('oil-ic');
+    ic.innerHTML = OIL_ICON;
+    const ov = div('oil-vals');
+    ov.append(span('oil-k', 'ÖL · FÄSSER'));
+    this.oilVal = span('oil-v', '—');
+    ov.appendChild(this.oilVal);
+    oilMain.append(ic, ov);
+    const oilFlow = div('oil-flow');
+    this.oilIncome = span('oil-inc pos', '+0/h');
+    this.oilIncome.title = 'Einnahmen pro Spielstunde (angelieferte Fässer)';
+    this.oilSpend = span('oil-spd neg', '−0/h');
+    this.oilSpend.title = 'Ausgaben pro Spielstunde (Produktion, Nachschub)';
+    this.oilTransit = span('oil-trn', '⛟ 0 unterwegs');
+    this.oilTransit.title = 'Fässer in Tankwagen-Konvois auf dem Weg zur Raffinerie';
+    oilFlow.append(this.oilIncome, this.oilSpend, this.oilTransit);
+    const supply = div('hud-supply');
+    supply.id = 'hud-supply';
+    this.oilBar.append(oilMain, oilFlow, supply);
+    top.append(bar, this.oilBar);
 
-    // ---------- Reiter rechts
-    const tabs = div('hud-tabs');
-    for (const t of TABS) {
-      const b = button(t.title, 'btn');
-      b.addEventListener('click', () => this.toggleTab(t.id));
-      tabs.appendChild(b);
-      this.tabBtns.set(t.id, b);
-    }
+    // ---------- Reiter rechts (Inhalte liefern andere Module per registerTab)
+    this.tabsEl = div('hud-tabs');
+    const tabs = this.tabsEl;
     this.drawer = div('panel hud-drawer hidden');
     const dh = div('panel-head');
     this.drawerTitle = span('', '');
@@ -140,6 +145,8 @@ export class Hud {
     dh.append(this.drawerTitle, dx);
     this.drawerBody = div('drawer-body scroll');
     this.drawer.append(dh, this.drawerBody);
+    this.registerTab('production', 'Produktion', Object.assign(div('hud-tab-content'), { id: 'hud-tab-production' }));
+    this.registerTab('supply', 'Nachschub', Object.assign(div('hud-tab-content'), { id: 'hud-tab-supply' }));
 
     // ---------- Infopanel unten rechts
     this.info = div('panel hud-info');
@@ -214,7 +221,7 @@ export class Hud {
       const meta = st.playerA3 ? this.geo.countriesByA3.get(st.playerA3) : undefined;
       this.flagEl.textContent = p?.flag ?? '⚑';
       this.nameEl.textContent = p?.name ?? meta?.name ?? st.playerA3 ?? '—';
-      this.govEl.textContent = p ? `${p.government} · ${p.bloc} · ${p.leaderTitle}` : '';
+      this.govEl.textContent = p ? `${p.government} · ${blocName(p.bloc)} · ${p.leaderTitle}` : '';
       this.infoDirty = true;
       this.shownInfoId = -1;
     }
@@ -240,22 +247,18 @@ export class Hud {
       this.zufBar.style.background = z < 45 ? 'var(--bad)' : z >= 60 ? 'var(--good)' : 'var(--amber)';
     }
 
-    // Ressourcen
-    for (const c of this.res) {
-      const v = fmtCompact(st.stock[c.key]);
-      const dv = st.delta[c.key];
-      const d = `${dv > 0 ? '+' : dv < 0 ? '−' : '±'}${fmtCompact(Math.abs(dv))}/T`;
-      if (v !== c.lastV) {
-        c.v.textContent = v;
-        c.lastV = v;
-        // Warnung, wenn Vorrat < 30 Tage
-        c.root.classList.toggle('low', dv < 0 && st.stock[c.key] < -dv * 30);
-      }
-      if (d !== c.lastD) {
-        c.d.textContent = d;
-        c.d.className = `res-d ${dv > 0 ? 'pos' : dv < 0 ? 'neg' : 'muted'}`;
-        c.lastD = d;
-      }
+    // Öl
+    const o = st.oil;
+    const key = `${Math.floor(o.barrels)}|${Math.round(o.incomePerHour * 10)}|${Math.round(o.spendPerHour * 10)}|${Math.round(o.inTransit)}`;
+    if (key !== this.lastOil) {
+      this.lastOil = key;
+      this.oilVal.textContent = fmtNum(Math.floor(o.barrels), 0);
+      this.oilIncome.textContent = `▲ +${fmtCompact(o.incomePerHour)}/h`;
+      this.oilIncome.className = `oil-inc ${o.incomePerHour > 0 ? 'pos' : 'muted'}`;
+      this.oilSpend.textContent = `▼ −${fmtCompact(o.spendPerHour)}/h`;
+      this.oilSpend.className = `oil-spd ${o.spendPerHour > 0 ? 'neg' : 'muted'}`;
+      this.oilTransit.textContent = `⛟ ${fmtCompact(o.inTransit)} unterwegs`;
+      this.oilBar.classList.toggle('low', o.barrels < 50 || (o.spendPerHour > o.incomePerHour && o.barrels < (o.spendPerHour - o.incomePerHour) * 6));
     }
 
     if (this.infoDirty) this.renderInfo();
@@ -314,37 +317,75 @@ export class Hud {
     this.setSpeed(this.speedBeforePause);
   }
 
+  /**
+   * Meldet einen Reiter am rechten Rand an. Existiert die ID schon (z. B. 'production', 'supply'), wird der Inhalt
+   * des vorhandenen Containers durch `el` ersetzt. `onToggle` meldet Öffnen/Schließen.
+   */
+  registerTab(id: string, label: string, el: HTMLElement, onToggle?: (open: boolean) => void): void {
+    const ex = this.tabs.get(id);
+    if (ex) {
+      if (ex.el !== el) {
+        ex.el.replaceChildren(el);
+        if (!el.id) el.id = `${ex.el.id}-inner`;
+      }
+      ex.btn.textContent = label;
+      ex.title = label;
+      if (onToggle) ex.onToggle = onToggle;
+      return;
+    }
+    const btn = button(label, 'btn');
+    btn.addEventListener('click', () => this.toggleTab(id));
+    el.classList.add('hud-tab-pane');
+    el.hidden = true;
+    this.drawerBody.appendChild(el);
+    this.tabsEl.appendChild(btn);
+    this.tabs.set(id, { id, title: label, el, btn, onToggle });
+  }
+
+  /** Setzt/entfernt die Detailanzeige im Infopanel (Ölfeld, Stadt, Basis …); null = zurück zur Länderanzeige */
+  setEntityInfo(title: string | null, rows: Array<[string, string]> = []): void {
+    this.entityInfo = title ? { title, rows } : null;
+    this.shownInfoId = -1;
+    this.infoDirty = true;
+  }
+
   private toggleTab(id: string | null): void {
     const next = id === this.openTab ? null : id;
+    const prev = this.openTab;
     this.openTab = next;
-    this.tabBtns.forEach((b, k) => b.classList.toggle('active', k === next));
-    const tab = TABS.find((t) => t.id === next);
+    this.tabs.forEach((t, k) => {
+      t.btn.classList.toggle('active', k === next);
+      t.el.hidden = k !== next;
+    });
+    if (prev && prev !== next) this.tabs.get(prev)?.onToggle?.(false);
+    const tab = next ? this.tabs.get(next) : undefined;
     if (!tab) {
       this.drawer.classList.add('hidden');
       return;
     }
     this.drawerTitle.textContent = tab.title;
-    const body = this.drawerBody;
-    body.replaceChildren();
-    body.append(div('muted', 'MODUL IN ENTWICKLUNG'), div('phase', `Folgt in ${tab.phase}`));
-    const ul = document.createElement('ul');
-    for (const it of tab.items) {
-      const li = document.createElement('li');
-      li.textContent = it;
-      ul.appendChild(li);
-    }
-    body.appendChild(ul);
     this.drawer.classList.remove('hidden');
+    tab.onToggle?.(true);
   }
 
   private renderInfo(): void {
     this.infoDirty = false;
+    const b = this.infoBody;
+    if (this.entityInfo) {
+      this.infoMode.textContent = 'OBJEKT';
+      this.shownInfoId = -2;
+      b.replaceChildren();
+      b.appendChild(div('hi-name', this.entityInfo.title));
+      const kv = div('kv');
+      for (const [k, v] of this.entityInfo.rows) kv.append(span('', k), span('', v));
+      b.appendChild(kv);
+      return;
+    }
     const id = this.hoverId || this.selectedId;
     const mode = this.hoverId ? 'ZEIGER' : this.selectedId ? 'AUSWAHL' : '';
     this.infoMode.textContent = mode;
     if (id === this.shownInfoId) return;
     this.shownInfoId = id;
-    const b = this.infoBody;
     b.replaceChildren();
     const c = this.geo.countriesById.get(id);
     if (!c) {
@@ -365,16 +406,17 @@ export class Hud {
     }
     const bloc = blocOf(c.a3);
     const blocEl = span('');
-    blocEl.appendChild(span(`tag tag-${bloc}`, bloc));
-    kv.append(span('', 'Block'), blocEl);
+    blocEl.appendChild(span(`tag tag-${bloc}`, blocName(bloc)));
+    kv.append(span('', 'Bündnis'), blocEl);
     const pop = p ? p.population : c.population / 1e6;
     kv.append(span('', 'Bevölkerung'), span('', pop > 0 ? `${fmtNum(pop, 1)} Mio.` : '—'));
-    const gdp = p ? p.gdp : c.gdpMd / 1000;
-    kv.append(span('', 'BIP'), span('', gdp > 0 ? `${fmtNum(gdp, 0)} Mrd $` : '—'));
     if (p) {
-      kv.append(span('', 'Regierung'), span('', p.government));
-    } else {
-      kv.append(span('', 'Kontrolle'), span('muted', 'KI-Nation'));
+      kv.append(span('', 'Regierung'), span('', p.government), span('', 'Hauptstadt'), span('', p.capital));
+    }
+    const fields = this.geo.meta.scenario?.oilFields.filter((f) => f.country === c.a3) ?? [];
+    if (fields.length) {
+      const out = fields.reduce((s, f) => s + f.output, 0);
+      kv.append(span('', 'Ölfelder'), span('', `${fields.length} · ${fmtNum(out, 0)} Fässer/h`));
     }
     b.appendChild(kv);
   }
@@ -401,6 +443,10 @@ function button(text: string, cls: string): HTMLButtonElement {
   b.className = cls;
   b.textContent = text;
   return b;
+}
+
+function blocName(b: string): string {
+  return b === 'BUND' ? 'Bündnis' : b === 'PAKT' ? 'Kronland-Pakt' : 'Neutral';
 }
 
 function fmtNum(v: number, digits: number): string {

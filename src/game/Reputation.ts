@@ -116,7 +116,7 @@ export class Reputation {
     const p = getProfile(a3);
     if (p) return p.government === 'Demokratie' ? 40 : p.government === 'Hybrid' ? 10 : -10;
     const b = blocOf(a3);
-    return b === 'NATO' ? 35 : b === 'CSTO' ? -10 : 0;
+    return b === 'BUND' ? 35 : b === 'PAKT' ? -10 : 0;
   }
 
   value(a3: string): number {
