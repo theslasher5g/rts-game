@@ -136,6 +136,7 @@ export const WEAPONS_BY_UNIT: Record<string, WeaponDef[]> = {
   spaa: [FLAK],
   sam: [SAM],
   supply_truck: [],
+  tanker_truck: [],
   attack_heli: [HELI_ATGM, HELI_ROCKET, HELI_GUN],
   transport_heli: [],
   fighter: [AIR_MISSILE, AIR_GUN],

@@ -3,9 +3,9 @@
 Browserbasiertes 3D-Echtzeit-Strategiespiel: Grand Strategy (Wirtschaft, Handel, Politik) trifft taktisches RTS
 im Retro-Look der PS2-Ära. Läuft komplett im Browser, ohne Installation.
 
-> **Stand: Phase 4 – Zivilisten und detailliertere Assets.** Zusätzlich zu Phase 1–3 (Karte, Straßennetz, Einheiten, Kampf,
-> Deckung, Bauwerke): Zivilisten in Städten, Schutzstatus mit Kriegsverbrechen und Ansehen, Evakuierung, Besatzung sowie
-> deutlich detailliertere Einheiten, Städte, Wälder und Dörfer.
+> **Stand: Phase 5 – Kleine Karte, Öl-Wirtschaft, Nachschub und Produktion.** Das Spiel ist von ganz Europa auf ein Szenario von
+> etwa 300 × 200 km umgestellt: reales Gelände (Alpen, Adriaküste, Ebene), aber erfundene Länder, Städte, Straßen und Ölfelder.
+> Fokus: Positionierung und Gefecht. **Öl ist die einzige Währung**: Ölfelder erobern, Straßen halten, den Gegner abschneiden.
 
 ## Schnellstart
 
@@ -126,6 +126,22 @@ anderen Weg, einen Krieg auszulösen.
 - **Brücken:** Pioniere legen Sprengladungen, ziehen sich zurück und sprengen. Die Kante im Wegenetz wird gesperrt, die
   Wegfindung weicht aus. Reparatur ist möglich.
 
+## Was Phase 5 enthält
+
+- **Szenario „Operation Nordadria“:** 300 × 200 km, Raster 0,25 km, erzeugt aus echten Höhendaten. Drei erfundene Nationen
+  (Valdoria, Kronland, Marenia) mit Grenzen entlang von Kämmen und Flüssen, 16 erfundene Städte, 9 Ölfelder, synthetisches
+  Straßen- und Schienennetz mit 58 Brücken (Engstellen). Neu erzeugen: `npm run region` (optional `-- --seed 99`).
+- **Öl-Wirtschaft:** Ölfelder fördern Fässer, Tankwagen-Konvois fahren auf dem echten Straßennetz zur Raffinerie. Angelieferte
+  Fässer sind das Guthaben für Produktion und Nachschub. Gesprengte Brücken, Sperren und überfallene Konvois unterbrechen den
+  Strom; Felder lassen sich erobern und beschädigen.
+- **Nachschub:** Einheiten werden an Depots, HQ und Raffinerie aufgetankt und mit Munition versorgt; Nachschub-LKWs fahren zur
+  Front. Ohne Nachschub sinkt die Moral.
+- **Produktion:** Kaserne, Fabrik, Flugplatz, Werft und Depot (von Pionieren gebaut) produzieren Einheiten gegen Fässer.
+  Panel „Produktion“ und „Nachschub“ am rechten Rand.
+- **Gegner:** Die Nationen betreiben dieselbe Wirtschaft; ein einfacher Treiber produziert Streitkräfte (ein vollwertiger
+  KI-Befehlshaber folgt in Phase 7).
+- **Startbildschirm:** Briefing, drei Nationen zur Wahl mit Stärken und Schwächen, Seed-Feld (Kartengenerator zur Laufzeit folgt).
+
 ## Was Phase 4 enthält
 
 - **Zivilisten:** Alle 172 Städte haben Einwohner, Zufriedenheit, Verluste und Zerstörungsgrad. Auf den Straßen fährt ziviler
@@ -181,12 +197,12 @@ server-autoritativ (Multiplayer) angebunden werden können.
 2. ✅ Straßennetz als Navigationsgraph, Einheiten, Auswahl, Formationen
 3. ✅ Kampfsystem, Effekte, Deckung, Gebäude, Gräben, Brücken sprengen
 4. ✅ Zivilisten und Schutzstatus
-5. Ressourcen, Zufriedenheit, Logistik, Produktion
-6. Handelssystem
-7. Politik und Allianzen
-8. Jahreszeiten und Wetter
+5. ✅ Kleine Karte, Öl-Wirtschaft, Nachschub und Produktion
+6. Darstellung an die kleine Karte anpassen (Gelände, Zoom, Symbole), Missionsziele, Kampagne (7 Missionen)
+7. KI-Befehlshaber (Angriff, Verteidigung, Konvoi-Überfälle, Brückensprengung)
+8. Wetter, Jahreszeiten und Tageszeit
 9. Multiplayer
-10. Forschung, Drohnen, KI, Balancing
+10. Forschung, Drohnen, Balancing, Feinschliff
 
 ## Datenquellen & Lizenzen
 

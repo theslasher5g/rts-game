@@ -63,7 +63,7 @@ type Sym =
 const TYPE_SYMBOL: Record<string, Sym> = {
   inf_squad: 'inf', mg_team: 'mg', at_team: 'at', sniper_team: 'sniper', medic_team: 'medic', engineer_squad: 'eng',
   mortar_team: 'mortar', recon_wheeled: 'recon_w', ifv: 'mech', apc_wheeled: 'mech_w', light_tank: 'armor_l',
-  mbt_medium: 'armor', mbt_heavy: 'armor', sp_artillery: 'art', mlrs: 'mlrs', spaa: 'aa', sam: 'sam', supply_truck: 'supply', aid_convoy: 'aid', field_hospital: 'hospital', ambulance: 'medic_v',
+  mbt_medium: 'armor', mbt_heavy: 'armor', sp_artillery: 'art', mlrs: 'mlrs', spaa: 'aa', sam: 'sam', supply_truck: 'supply', tanker_truck: 'supply', aid_convoy: 'aid', field_hospital: 'hospital', ambulance: 'medic_v',
   attack_heli: 'rotary', transport_heli: 'rotary_t', fighter: 'fixed', bomber: 'bomber', recon_drone: 'uav', fpv_swarm: 'fpv',
   destroyer: 'surface', frigate: 'surface', submarine: 'sub',
 };

@@ -2,6 +2,7 @@ import '@fontsource/share-tech-mono';
 import './ui/styles.css';
 import './control/styles-control.css';
 import './ui/civil.css';
+import './ui/production.css';
 
 import { bus } from './core/EventBus';
 import { Input } from './core/Input';
@@ -9,6 +10,11 @@ import type { Settings } from './core/types';
 import { RTSCamera } from './camera/RTSCamera';
 import { SelectionController } from './control/SelectionController';
 import { Sfx } from './audio/Sfx';
+import { EconomyAI } from './logistics/EconomyAI';
+import { OilEconomy } from './logistics/OilEconomy';
+import { SupplySystem } from './logistics/SupplySystem';
+import { ProductionSystem } from './production/ProductionSystem';
+import { ProductionPanel } from './ui/ProductionPanel';
 import { CivilianSystem } from './civil/CivilianSystem';
 import { Occupation } from './civil/Occupation';
 import { ProtectionSystem } from './civil/ProtectionSystem';
@@ -104,6 +110,14 @@ async function boot() {
   const civilToggle = uiRoot.querySelector('.cv-toggle') as HTMLElement | null;
   if (civilToggle) civilToggle.style.display = 'none';
   units.roadSpeedFactor = (x, z) => civil.speedFactorAt(x, z);
+
+  // --- Öl-Wirtschaft, Nachschub, Produktion (Phase 5)
+  const economy = new OilEconomy({ geo, units, pathfinder, war, settings });
+  economy.setCivil(civil);
+  const supply = new SupplySystem({ geo, units, economy, pathfinder, war, settings, getPlayer: playerOf });
+  const production = new ProductionSystem({ geo, units, economy, cities, settings });
+  const econAI = new EconomyAI({ geo, economy, production, units, war, getPlayer: playerOf });
+  gfx.scene.add(economy.object, production.object);
   ctl.cc.services = { combat, structures, cities, war, protection };
   const unlockAudio = () => sfx.resume();
   window.addEventListener('pointerdown', unlockAudio, { once: true });
@@ -117,6 +131,7 @@ async function boot() {
   const settingsPanel = new SettingsPanel(uiRoot, settings);
   const menu = new MainMenu(uiRoot, geo);
   const hud = new Hud(uiRoot, geo, state);
+  const prodPanel = new ProductionPanel({ production, economy, supply, getPlayer: playerOf, hud, root: uiRoot, getSelectedIds: () => ctl.selectedUnits().map((u) => u.id) });
   void settingsPanel;
 
   let hoveredId = 0;
@@ -133,6 +148,8 @@ async function boot() {
     units.applySettings(s);
     unitRenderer.applySettings(s);
     structures.applySettings(s);
+    economy.applySettings(s);
+    production.applySettings(s);
     civil.applySettings(s);
     worldDetail.applySettings(s);
     bridges.applySettings(s);
@@ -166,6 +183,8 @@ async function boot() {
     if (civilToggle) civilToggle.style.display = '';
     for (const [a, b] of state.scenarioWars()) war.declare(a, b);
     for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
+    economy.loadScenario(geo.meta.scenario);
+    prodPanel.show();
     const hq = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3)?.hq;
     if (hq) rts.focus(hq[0], hq[1], 80);
     else if (c) rts.focus(c.label[0], c.label[1], 80);
@@ -186,6 +205,10 @@ async function boot() {
   input.onClick((e) => {
     const { ndcX, ndcY, button, double } = e;
     if (button !== 0) return;
+    if (prodPanel.isTargeting()) {
+      const h = picker.pick(ndcX, ndcY, rts.camera);
+      if (h && prodPanel.onMapClick(h.x, h.z)) return;
+    }
     if (ctl.handleClick(e)) return; // Einheit angeklickt / Befehlsmodus aktiv
     const hit = picker.pick(ndcX, ndcY, rts.camera);
     if (!hit) return;
@@ -220,6 +243,12 @@ async function boot() {
     tactics.update(gameSec, dt);
     combat.update(gameSec);
     structures.update(state.lastHours, dt);
+    if (state.playerA3) {
+      economy.update(state.lastHours, dt);
+      supply.update(state.lastHours, dt);
+      production.update(state.lastHours, dt);
+      econAI.update(state.lastHours);
+    }
     if (state.lastHours > 0) {
       civil.update(state.lastHours, dt, rts.camera);
       protection.update(state.lastHours);
@@ -248,6 +277,7 @@ async function boot() {
       hud.update(dt);
       unitPanel.update(dt);
       civilPanel.update(dt);
+      prodPanel.update(dt);
       minimap.update(rts.getGroundFootprint(), selectedId, playerId);
     }
     requestAnimationFrame(frame);
@@ -258,7 +288,7 @@ async function boot() {
   requestAnimationFrame(frame);
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, economy, supply, production };
 }
 
 boot().catch((err: unknown) => {
