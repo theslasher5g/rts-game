@@ -15,6 +15,9 @@ export interface Objective {
   commitUntil: number;
   /** Eigentümer zu Planbeginn (um Erfolg zu erkennen) */
   ownerAtStart: string;
+  /** Belagerung von Anlagen: Basis-HP bei Beobachtungsbeginn und Zeitpunkt (Fortschrittskontrolle) */
+  hp?: number;
+  hpAt?: number;
 }
 
 export interface BattleGroup {

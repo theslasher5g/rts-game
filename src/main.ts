@@ -9,7 +9,14 @@ import { Input } from './core/Input';
 import type { Settings } from './core/types';
 import { RTSCamera } from './camera/RTSCamera';
 import { SelectionController } from './control/SelectionController';
+import { AICommander } from './ai/AICommander';
 import { Sfx } from './audio/Sfx';
+import { FogOfWar } from './fog/FogOfWar';
+import type { GameContext } from './game/context';
+import { MissionSystem, Tutorial, nextMissionId, resolveMission } from './game/missions';
+import { EndScreen } from './ui/EndScreen';
+import { MissionPanel } from './ui/MissionPanel';
+import { TutorialOverlay } from './ui/TutorialOverlay';
 import { EconomyAI } from './logistics/EconomyAI';
 import { OilEconomy } from './logistics/OilEconomy';
 import { SupplySystem } from './logistics/SupplySystem';
@@ -22,7 +29,7 @@ import { Reputation } from './game/Reputation';
 import { CivilPanel } from './ui/CivilPanel';
 import { CombatSystem } from './combat/CombatSystem';
 import { Effects } from './fx/Effects';
-import { START_PROFILES } from './game/countryData';
+import { START_PROFILES, getProfile } from './game/countryData';
 import { War } from './game/War';
 import { BridgeRenderer } from './structures/BridgeRenderer';
 import { StructureManager } from './structures/StructureManager';
@@ -134,6 +141,38 @@ async function boot() {
   const menu = new MainMenu(uiRoot, geo);
   const hud = new Hud(uiRoot, geo, state);
   const prodPanel = new ProductionPanel({ production, economy, supply, getPlayer: playerOf, hud, root: uiRoot, getSelectedIds: () => ctl.selectedUnits().map((u) => u.id) });
+
+  // --- Spielkontext, Nebel des Krieges, KI, Missionen (Phase 6)
+  const ctx: GameContext = { geo, state, war, units, combat, economy, production, supply, civil, structures, cities, graph, pathfinder, player: playerOf };
+  const fog = new FogOfWar(geo, units, { player: playerOf, allies: (a3) => getProfile(a3)?.allies ?? [], smoke: effects.smoke });
+  fog.bindTerrain(terrain);
+  fog.attachEconomy(economy);
+  unitRenderer.setFog(fog);
+  combat.setFog(fog);
+  minimap.setFog(fog);
+  ctl.isUnitVisible = (u) => fog.isUnitVisible(u);
+  fog.applySettings(settings);
+  const missions = new MissionSystem(ctx);
+  missions.getWarCrimes = () => reputation.totalWarCrimes();
+  const missionPanel = new MissionPanel(uiRoot, missions);
+  const endScreen = new EndScreen(uiRoot, missions);
+  const tutorial = new Tutorial({ ctx, getCameraDistance: () => rts.distance, getSelectedIds: () => ctl.selectedUnits().map((u) => u.id) });
+  const tutorialOverlay = new TutorialOverlay(uiRoot, tutorial);
+  const ais: AICommander[] = [];
+  let aiHeld = false;
+  endScreen.onAction = (a) => {
+    if (a === 'menu') return false;
+    const cur = missions.current;
+    const id = a === 'next' && cur ? nextMissionId(cur.id) : cur?.id;
+    if (!id || !cur) return false;
+    try {
+      sessionStorage.setItem('ww3.autostart', `${id}|${cur.playerNation}`);
+    } catch {
+      /* ignorieren */
+    }
+    location.reload();
+    return true;
+  };
   void settingsPanel;
 
   let hoveredId = 0;
@@ -151,6 +190,7 @@ async function boot() {
     unitRenderer.applySettings(s);
     structures.applySettings(s);
     economy.applySettings(s);
+    fog.applySettings(s);
     production.applySettings(s);
     civil.applySettings(s);
     worldDetail.applySettings(s);
@@ -169,7 +209,7 @@ async function boot() {
     labels.setSelected(id);
   });
   bus.on('camera:focus', ({ x, z, distance }) => rts.focus(x, z, distance));
-  bus.on('game:start', ({ countryA3 }) => {
+  bus.on('game:start', ({ countryA3, missionId }) => {
     const c = geo.countriesByA3.get(countryA3);
     playerId = c?.id ?? 0;
     state.startGame(countryA3);
@@ -187,6 +227,25 @@ async function boot() {
     for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
     economy.loadScenario(geo.meta.scenario);
     prodPanel.show();
+    // Mission, Nebel, KI-Befehlshaber
+    const def = resolveMission(missionId, countryA3);
+    fog.setEnabled(settings.fogOfWar !== false);
+    // Startaufklärung: Umgebung des HQ und die eigenen Ölfelder sind als „erkundet“ bekannt (Terrain sichtbar, Gegner nicht)
+    const startMeta = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3);
+    if (startMeta) {
+      fog.revealArea(startMeta.hq[0], startMeta.hq[1], 22);
+      for (const f of economy.fields) if (f.owner === countryA3) fog.revealArea(f.x, f.z, 7);
+    }
+    fog.updateNow();
+    missions.load(def);
+    for (const a of ais) a.dispose();
+    ais.length = 0;
+    for (const p of START_PROFILES) {
+      if (p.a3 === countryA3) continue;
+      ais.push(new AICommander(ctx, { a3: p.a3, difficulty: def.ai.difficulty, style: war.isHostile(p.a3, countryA3) ? 'aggressor' : 'defender', econ: econAI }));
+    }
+    aiHeld = false;
+    if (missions.wantsTutorial) tutorial.start();
     const hq = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3)?.hq;
     if (hq) rts.focus(hq[0], hq[1], 80);
     else if (c) rts.focus(c.label[0], c.label[1], 80);
@@ -252,6 +311,14 @@ async function boot() {
       supply.update(state.lastHours, dt);
       production.update(state.lastHours, dt);
       econAI.update(state.lastHours);
+      const hold = missions.aiHeld();
+      if (hold !== aiHeld) {
+        aiHeld = hold;
+        for (const a of ais) a.setEnabled(!hold);
+      }
+      for (const a of ais) a.update(state.lastHours, dt);
+      fog.update(state.lastHours, dt);
+      missions.update(state.lastHours);
     }
     if (state.lastHours > 0) {
       civil.update(state.lastHours, dt, rts.camera);
@@ -282,6 +349,9 @@ async function boot() {
       unitPanel.update(dt);
       civilPanel.update(dt);
       prodPanel.update(dt);
+      missionPanel.update(dt);
+      tutorial.update(dt);
+      tutorialOverlay.update(dt);
       minimap.update(rts.getGroundFootprint(), selectedId, playerId);
     }
     requestAnimationFrame(frame);
@@ -290,9 +360,20 @@ async function boot() {
   hideLoading();
   menu.show();
   requestAnimationFrame(frame);
+  // Nach „Wiederholen“/„Nächste Mission“ startet die Mission automatisch
+  try {
+    const auto = sessionStorage.getItem('ww3.autostart');
+    if (auto) {
+      sessionStorage.removeItem('ww3.autostart');
+      const [mid, a3] = auto.split('|');
+      bus.emit('game:start', { countryA3: a3 || 'VAL', missionId: mid });
+    }
+  } catch {
+    /* ignorieren */
+  }
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, economy, supply, production };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, economy, supply, production, fog, missions, ais };
 }
 
 boot().catch((err: unknown) => {

@@ -230,7 +230,7 @@ export class EconomyAI {
       for (const k of ids) { if ((r -= w[k]) <= 0) { typeId = k; break; } }
       const price = priceOf(typeId);
       if (price > budget) continue;
-      const base = this.pickBase(a3, typeId, 2);
+      const base = this.pickBase(a3, typeId, economy.pool(a3).barrels > 900 ? 4 : 2);
       if (base === null) continue;
       if (production.queue(base, typeId, rl()).ok) { budget -= price; armed++; m.stats.queued++; }
     }

@@ -130,7 +130,7 @@ export class AICommander {
       this.econ = new EconomyAI({ geo: ctx.geo, economy: ctx.economy, production: ctx.production, units: ctx.units, war: ctx.war, getPlayer: ctx.player });
       this.ownsEcon = true;
     }
-    this.econ.setManaged(this.a3, true);
+    if (this.enabled) this.econ.setManaged(this.a3, true);
     this.econ.engineerBusy = (id) => this.engJobs.has(id);
     const now = 0;
     this.defense = newGroup('defense', 'idle', now);
@@ -148,8 +148,9 @@ export class AICommander {
 
   setEnabled(b: boolean): void {
     this.enabled = b;
-    this.econ.setEnabled(this.a3, b);
-    if (b) this.econ.setManaged(this.a3, true);
+    // aus: Produktion fällt auf den einfachen EconomyAI-Modus zurück (kein Kommandeur)
+    this.econ.setManaged(this.a3, b);
+    if (b) this.applyPreset();
   }
 
   setDifficulty(d: Difficulty): void {
@@ -174,7 +175,7 @@ export class AICommander {
     const ph = this.phase;
     this.phase = (ph + 1) % 3;
     this.orders = 0;
-    this.planner.tick(this.time, ph === 0 ? 8 : 4);
+    this.planner.tick(this.time, ph === 0 ? 2 : 1);
     if (!this.inited) this.init();
     if (ph === 0) this.phaseSituation();
     else if (this.rnd() >= this.P.skipChance) {
@@ -402,16 +403,21 @@ export class AICommander {
     const w: Record<string, number> = this.weights;
     const defender = this.style === 'defender';
     const set = (id: string, v: number) => { w[id] = v; };
-    set('inf_squad', defender ? 18 : 13); set('at_team', 6); set('mg_team', 4); set('mortar_team', 3); set('engineer_squad', 0);
-    set('mbt_medium', defender ? 11 : 16); set('mbt_heavy', defender ? 4 : 6); set('light_tank', 3); set('ifv', 11); set('apc_wheeled', 4); set('recon_wheeled', P.raidGroups > 0 ? 6 : 3);
+    // Fußtruppen marschieren nicht in Wellen mit: der Aggressor hält nur so viele, wie die Posten brauchen
+    let defFoot = 0;
+    for (const id of this.defense.ids) { const u = this.ctx.units.get(id); if (u && isFoot(u)) defFoot++; }
+    const footCap = defender ? 40 : 10 + 3 * this.ownFields.length;
+    const fm = defFoot >= footCap ? 0 : 1;
+    set('inf_squad', (defender ? 18 : 6) * fm); set('at_team', (defender ? 7 : 4) * fm); set('mg_team', (defender ? 4 : 2) * fm); set('mortar_team', 2 * fm); set('engineer_squad', 0);
+    set('mbt_medium', defender ? 11 : 18); set('mbt_heavy', defender ? 4 : 7); set('light_tank', 3); set('ifv', defender ? 11 : 14); set('apc_wheeled', 4); set('recon_wheeled', P.raidGroups > 0 ? 6 : 3);
     set('sp_artillery', defender ? 8 : 6); set('mlrs', 2); set('spaa', 3); set('sam', 0); set('supply_truck', 0);
     set('attack_heli', 0); set('fighter', 0); set('bomber', 0); set('sniper_team', 0);
     const hasAirfield = economy.countBases(a3, 'airfield') > 0;
     if (hasAirfield && P.airSorties) { set('attack_heli', 6); set('fighter', 2); set('bomber', defender ? 0 : 1.5); }
     if (P.counters && c.total > 20) {
       const t = c.tank / c.total, i = c.inf / c.total, ar = c.air / c.total;
-      w.at_team += 12 * t; w.mbt_heavy += 8 * t; w.attack_heli += hasAirfield ? 8 * t : 0; w.ifv += 2 * t;
-      w.mg_team += 8 * i; w.light_tank += 6 * i; w.ifv += 6 * i; w.mortar_team += 4 * i; w.mbt_medium += 4 * i;
+      w.at_team += 12 * t * fm; w.mbt_heavy += 8 * t; w.attack_heli += hasAirfield ? 8 * t : 0; w.ifv += 2 * t;
+      w.mg_team += 8 * i * fm; w.light_tank += 6 * i; w.ifv += 6 * i; w.mortar_team += 4 * i * fm; w.mbt_medium += 4 * i;
       if (ar > 0.04) { w.spaa += 5 + 20 * ar; w.sam += (ar > 0.12 ? 3 : 0); w.fighter += hasAirfield ? 4 * ar * 10 : 0; }
     } else if (c.air > 0 && P.airSorties) { w.spaa += 3; }
     // Pioniere & Nachschub: Bedarf direkt bestellen
@@ -425,7 +431,7 @@ export class AICommander {
     if (pool > P.richBarrels && this.hq) {
       const frontKm = Math.hypot(this.staging[0] - this.hq[0], this.staging[1] - this.hq[1]);
       if (economy.countBases(a3, 'depot') < 2 && frontKm > 3) this.econ.requestBase(a3, 'depot', this.staging[0], this.staging[1], 6);
-      else if (economy.countBases(a3, 'factory') < 2) this.econ.requestBase(a3, 'factory', this.hq[0], this.hq[1], 12);
+      else if (economy.countBases(a3, 'factory') < (pool > P.richBarrels * 2 ? 3 : 2)) this.econ.requestBase(a3, 'factory', this.hq[0], this.hq[1], 12);
       else if (P.airSorties && !hasAirfield && pool > P.richBarrels + 150) this.econ.requestBase(a3, 'airfield', this.hq[0], this.hq[1], 12);
       else if (economy.countBases(a3, 'barracks') < 2) this.econ.requestBase(a3, 'barracks', this.hq[0], this.hq[1], 12);
     }
@@ -486,7 +492,7 @@ export class AICommander {
       if (cat === 'naval') { this.addTo(this.naval, u.id); if (!this.navalHome.has(u.id)) this.navalHome.set(u.id, [u.x, u.z]); continue; }
       if (cat === 'aa') { this.addTo(t.id === 'sam' || this.defense.ids.length < quota + 2 ? this.defense : intake, u.id); continue; }
       if (t.damage <= 0 || !GROUND_CORE.has(cat)) continue;
-      if (isFoot(u)) { this.addTo(this.defense.ids.length < quota * 1.3 ? this.defense : intake, u.id); continue; }
+      if (isFoot(u)) { this.addTo(this.defense, u.id); continue; }
       if (P.raidGroups > 0 && isFast(u) && this.raidPool.ids.length + this.raids.reduce((s, r) => s + r.ids.length, 0) < P.raidGroups * 4 && this.style === 'aggressor') { this.addTo(this.raidPool, u.id); continue; }
       this.addTo(this.defense.ids.length < quota ? this.defense : intake, u.id);
     }
@@ -604,7 +610,8 @@ export class AICommander {
       if (!isFinite(km)) { this.blacklist.set(key, this.time + 6); return; }
       const guard = map.enemyNear(x, z, 7);
       if (ownStrength < guard * P.minRatio) return;
-      const s = (value / (1 + km / 60)) * Math.min(2, ownStrength / (guard * P.minRatio + 10));
+      const pl = this.ctx.player();
+      const s = (value / (1 + km / 60)) * Math.min(2, ownStrength / (guard * P.minRatio + 10)) * (pl && owner === pl ? 1.35 : 1);
       if (s > bs) { bs = s; best = { kind, x, z, id, name, commitUntil: this.time + P.commitHours, ownerAtStart: owner }; }
     };
     for (const f of this.targetFields) {
@@ -677,7 +684,7 @@ export class AICommander {
         if (weak || outgunned) { this.beginRetreat(g, units, obj); break; }
         const dObj = Math.hypot(this.cen[0] - obj.x, this.cen[1] - obj.z);
         if (g.state === 'advance' && dObj < 3) setState(g, 'assault', now);
-        if (g.state === 'assault' && now - g.since > 5) { this.blacklist.set(this.objKey(obj), now + 10); this.beginRetreat(g, units, obj); break; }
+        if (g.state === 'assault' && (obj.kind === 'field' ? now - g.since > 5 : this.assaultStalled(obj))) { this.blacklist.set(this.objKey(obj), now + 10); this.beginRetreat(g, units, obj); break; }
         if (now - g.lastOrderAt >= 0.5 || g.lastOrderAt < 0) this.driveToObjective(g, units, obj);
         break;
       }
@@ -726,6 +733,17 @@ export class AICommander {
     if (mid) { s.startStrength += add; s.lastOrderAt = -99; }
   }
 
+  /** Belagerung ohne Fortschritt (Anlagen-HP sinkt nicht) oder Zeitlimit */
+  private assaultStalled(o: Objective): boolean {
+    const b = this.ctx.economy.bases.get(o.id);
+    if (!b) return false;
+    if (o.hp === undefined || o.hpAt === undefined) { o.hp = b.hp; o.hpAt = this.time; return false; }
+    if (this.time - o.hpAt < 3) return false;
+    const stalled = o.hp - b.hp < b.hpMax * 0.04;
+    o.hp = b.hp; o.hpAt = this.time;
+    return stalled;
+  }
+
   private objKey(o: Objective): string {
     return o.kind === 'field' ? `f${o.id}` : o.kind === 'refinery' ? `r${o.id}` : o.kind === 'hq' ? `h${o.id}` : `p${Math.round(o.x / 4)}_${Math.round(o.z / 4)}`;
   }
@@ -752,9 +770,13 @@ export class AICommander {
       if (isFoot(u)) { if (footOk) foot.push(u.id); } else fast.push(u.id);
     }
     // Basisziele: aus Reichweite auf die Anlage feuern, sobald nah genug und kein Feind in der Nähe
-    if (g.state === 'assault' && (obj.kind === 'refinery' || obj.kind === 'hq') && this.map.enemyNear(this.cen[0], this.cen[1], 4) < 8) {
+    if (g.state === 'assault' && (obj.kind === 'refinery' || obj.kind === 'hq')) {
+      // Anlage unter Feuer nehmen: nur Einheiten, die gerade nicht im Gefecht sind
       const f = this.tmpIds3; f.length = 0;
-      for (const u of units) if (Math.hypot(u.x - obj.x, u.z - obj.z) <= u.type.rangeKm * 0.95 && u.type.damage > 0 && u.type.category !== 'aa') f.push(u.id);
+      for (const u of units) {
+        if (u.engaged || u.type.damage <= 0 || u.type.category === 'aa' || u.orders[0]?.kind === 'fireAt') continue;
+        if (Math.hypot(u.x - obj.x, u.z - obj.z) <= u.type.rangeKm * 0.95) f.push(u.id);
+      }
       if (f.length && this.canOrder() && !this.cityNear(obj.x, obj.z, 1.5)) { this.orders++; this.ctx.combat.orderFireAt(f, obj.x, obj.z); }
     }
     const a = this.move(fast, obj.x, obj.z, 'attackMove');
@@ -1205,6 +1227,7 @@ export class AICommander {
     if (this.time - c.at < 3 && c.ver === this.ctx.graph.version) return;
     c.at = this.time; c.ver = this.ctx.graph.version;
     c.edges.clear(); c.own.clear();
+    this.planner.missed = false;
     const { economy } = this.ctx;
     const list: number[] = [];
     const routesFor = (owner: string, into: Map<number, number> | Set<number>) => {
@@ -1226,6 +1249,7 @@ export class AICommander {
       const r = this.planner.route(this.staging[0], this.staging[1], obj.x, obj.z);
       if (r) { this.planner.bridgesOnRoute(r, list); for (const e of list) c.own.add(e); }
     }
+    if (this.planner.missed) c.at = this.time - 2.5; // unvollständig: bald erneut versuchen (Routen sind inzwischen gecacht)
   }
 
   private freeEngineers(): Unit[] {

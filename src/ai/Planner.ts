@@ -20,6 +20,8 @@ export class Planner {
   readonly prof: Profiles;
   /** Verbleibendes Routenbudget des aktuellen Takts */
   budget = 4;
+  /** true, wenn eine Route wegen leerem Budget nicht berechnet wurde (Ergebnis unvollständig, später wiederholen) */
+  missed = false;
   private readonly cache = new Map<number, Entry>();
   private readonly rect: number[] = [];
   private readonly seen = new Set<number>();
@@ -50,7 +52,7 @@ export class Planner {
     const k = this.key(fx, fz, tx, tz, p);
     const e = this.cache.get(k);
     if (e && e.ver === this.graph.version && this.time - e.t < 4) return e.route;
-    if (this.budget <= 0) return null;
+    if (this.budget <= 0) { this.missed = true; return null; }
     this.budget--;
     const r = this.pf.findRoute(fx, fz, tx, tz, p);
     this.cache.set(k, { route: r, km: r ? r.lengthKm : Infinity, t: this.time, ver: this.graph.version });
