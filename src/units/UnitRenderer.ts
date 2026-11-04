@@ -23,7 +23,7 @@ export const VIS_SCALE_K = 4;
 export const VIS_SCALE_MIN = 3;
 export const VIS_SCALE_MAX = 600;
 /** Ab diesem Kameraabstand (km) NATO-Zeichen statt 3D-Modelle (± Hysterese) */
-export const COUNTER_DISTANCE = 350;
+export const COUNTER_DISTANCE = 120;
 const COUNTER_HYST = 0.08;
 /** Zeichengröße (CSS-Pixel) */
 const COUNTER_PX = 36;

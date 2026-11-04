@@ -32,10 +32,11 @@ export interface CivilianDeps {
 // ------------------------------------------------------------------ Tuning
 
 /** Modellsichtbarkeit (Kameraabstand km) */
-const INFRA_MODEL_MAX = 150;
-const INFRA_ICON_MIN = 150;
-const INFRA_ICON_MAX = 900;
-const EMBLEM_MAX = 600;
+// Kleine Karte (300 × 200 km): Gesamtansicht ≈ 320 km Abstand – dort keine Symbole, sie erscheinen erst beim Heranzoomen
+const INFRA_MODEL_MAX = 60;
+const INFRA_ICON_MIN = 60;
+const INFRA_ICON_MAX = 170;
+const EMBLEM_MAX = 170;
 const AMBIENT_MAX = 30;
 const PED_MAX_DIST = 8;
 const FLOW_LINE_MIN = 10;

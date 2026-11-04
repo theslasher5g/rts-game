@@ -54,7 +54,7 @@ class GB {
     for (let i = 0; i < p.length; i += 3) {
       this.pos.push(p[i], p[i + 1], p[i + 2]);
       const k = 0.92 + 0.16 * (((i / 3) * 2654435761) % 7) / 7; // leichte Körnung
-      this.col.push(this.c.r * k, this.c.g * k, this.c.b * k);
+      this.col.push(Math.min(1, this.c.r * k * 1.45), Math.min(1, this.c.g * k * 1.45), Math.min(1, this.c.b * k * 1.45));
     }
     if (n !== g) n.dispose();
     g.dispose();
@@ -115,7 +115,7 @@ interface Model {
   radiusM: number;
 }
 
-const PAD = 0x6e6d62, STEEL = 0x8c8e90, DARKSTEEL = 0x4a4c4e, RUST = 0x8a4a2a, TANK = 0xbab6a8, CONCRETE = 0x9a998e, OLIVE = 0x5a6a46, ROOF = 0x6a5a4a;
+const PAD = 0x6e6d62, STEEL = 0x8c8e90, DARKSTEEL = 0x4a4c4e, RUST = 0x8a4a2a, TANK = 0xbab6a8, OLIVE = 0x5a6a46, ROOF = 0x6a5a4a;
 const BLUEGREY = 0x3a5a7a, SAND = 0xb8aa86;
 
 function scaffold(r: number, h = 16): THREE.BufferGeometry {
@@ -375,7 +375,7 @@ function modelOf(kind: SiteKind): Model {
 
 // ------------------------------------------------------------------ Marker-Symbole
 
-const ICON_KINDS: SiteKind[] = ['rig', 'hq', 'refinery', 'barracks', 'factory', 'airfield', 'shipyard', 'depot', 'fuel_depot'];
+const ICON_KINDS: SiteKind[] = ['rig', 'refinery', 'hq', 'barracks', 'factory', 'airfield', 'shipyard', 'depot', 'fuel_depot'];
 
 function iconTexture(kind: SiteKind): THREE.Texture | null {
   if (typeof document === 'undefined') return null;
@@ -427,10 +427,13 @@ interface SiteObj {
   gy: number;
 }
 
-const MODEL_MAX_DIST = 110;
-const MARKER_MIN_DIST = 70;
-const SCALE_K = 0.12;
-const SCALE_MAX = 16;
+const MODEL_MAX_DIST = 75;
+const MARKER_MIN_DIST = 45;
+const SCALE_K = 1.5;
+const SCALE_MIN = 2;
+const SCALE_MAX = 40;
+/** Große Anlagen wachsen weniger stark mit dem Kameraabstand */
+const KIND_SCALE: Partial<Record<SiteKind, number>> = { hq: 0.7, factory: 0.7, refinery: 0.55, airfield: 0.5, shipyard: 0.6 };
 const _cam = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
@@ -588,7 +591,7 @@ export class SiteLayer {
     this.camDistKm = dist;
     const showModels = dist <= MODEL_MAX_DIST;
     const showMarkers = dist >= MARKER_MIN_DIST;
-    const sc = Math.min(SCALE_MAX, Math.max(1, SCALE_K * dist));
+    const sc = Math.min(SCALE_MAX, Math.max(SCALE_MIN, SCALE_K * dist));
     const changed = Math.abs(sc / (this.lastScale || 1) - 1) > 0.03 || this.lastScale === 0;
     if (showMarkers && this.markersDirty) this.rebuildMarkers();
     for (const p of this.markers.values()) p.visible = showMarkers && p.geometry.drawRange.count > 0;
@@ -597,10 +600,10 @@ export class SiteLayer {
       if (s.group.visible !== showModels) { s.group.visible = showModels; flipped = true; }
     }
     if (showModels && (changed || flipped)) {
-      const k = sc * 0.001;
       for (const s of this.sites.values()) {
-        s.group.position.set(s.st.x, s.gy + 0.0004 * sc, s.st.z);
-        s.group.scale.setScalar(k);
+        const ks = sc * (KIND_SCALE[s.st.kind] ?? 1);
+        s.group.position.set(s.st.x, s.gy + 0.0004 * ks, s.st.z);
+        s.group.scale.setScalar(ks * 0.001);
         s.group.updateMatrix();
         s.group.matrixWorld.copy(s.group.matrix);
         for (const c of s.group.children) c.updateMatrixWorld(true);

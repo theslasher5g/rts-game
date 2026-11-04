@@ -1,0 +1,118 @@
+/* ==========================================================================
+   Phase 5 – Produktion & Nachschub (ProductionPanel). Militär-Terminal wie HUD/Steuerung.
+   ========================================================================== */
+.prod-panel { font-family: var(--font); font-size: 12px; color: var(--text); line-height: 1.4; }
+.prod-panel h4 {
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border-bottom: 1px solid var(--line-dim);
+  padding-bottom: 2px;
+}
+.prod-panel h4:first-child { margin-top: 0; }
+.prod-bal { display: grid; grid-template-columns: 1fr auto; gap: 1px 10px; margin-bottom: 4px; }
+.prod-bal span:nth-child(odd) { color: var(--dim); }
+.prod-bal span:nth-child(even) { text-align: right; color: var(--text); }
+.prod-bal .pos { color: var(--good) !important; }
+.prod-bal .neg { color: var(--bad) !important; }
+.prod-oil { color: var(--amber-hi); font-size: 15px; letter-spacing: 0.06em; }
+
+.prod-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 3px 5px;
+  margin: 2px 0;
+  border: 1px solid var(--line-dim);
+  background: rgba(0, 0, 0, 0.25);
+  cursor: default;
+}
+.prod-row.sel { border-color: var(--amber); background: rgba(227, 165, 52, 0.12); }
+.prod-row.click { cursor: pointer; }
+.prod-row.click:hover { border-color: var(--amber); }
+.prod-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prod-row .sub { grid-column: 1 / -1; color: var(--dim); font-size: 11px; display: flex; justify-content: space-between; gap: 6px; }
+.prod-row.bad { border-color: rgba(226, 89, 62, 0.6); }
+.prod-row.warn { border-color: rgba(227, 180, 67, 0.6); }
+
+.prod-bar { height: 5px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(0, 0, 0, 0.5); grid-column: 1 / -1; }
+.prod-bar > i { display: block; height: 100%; width: 0; background: var(--amber); }
+.prod-bar.hp > i { background: var(--good); }
+.prod-bar.hp.low > i { background: var(--bad); }
+
+.prod-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+.prod-btn:hover:not(:disabled) { background: var(--panel-hi); color: var(--amber-hi); border-color: var(--amber); }
+.prod-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.prod-btn.on { background: rgba(227, 165, 52, 0.22); color: var(--amber-hi); border-color: var(--amber); }
+.prod-btn .pr { color: var(--amber); white-space: nowrap; }
+.prod-btn.x { padding: 0 6px; color: var(--bad); }
+.prod-buy { display: grid; grid-template-columns: 1fr; gap: 3px; }
+.prod-buy .prod-btn { width: 100%; }
+.prod-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.prod-hint {
+  margin: 6px 0;
+  padding: 4px 6px;
+  border: 1px dashed var(--amber);
+  color: var(--amber-hi);
+  background: rgba(227, 165, 52, 0.08);
+  font-size: 11px;
+}
+.prod-empty { color: var(--dim); font-size: 11px; padding: 2px 0; }
+.prod-tag { display: inline-block; padding: 0 4px; border: 1px solid currentColor; font-size: 10px; line-height: 14px; letter-spacing: 0.06em; text-transform: uppercase; }
+.prod-tag.ok { color: var(--good); }
+.prod-tag.cut { color: var(--bad); }
+.prod-tag.en { color: var(--bad); }
+.prod-tag.dead { color: var(--dim); }
+.prod-tag.neu { color: var(--warn); }
+.prod-tag.ally { color: var(--blue); }
+
+/* Schwebende Variante (ohne HUD-Reiter) */
+#ui > .prod-floating {
+  position: absolute;
+  right: 12px;
+  top: 128px;
+  width: 300px;
+  max-height: calc(100vh - 300px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  background-image: var(--scan);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.5);
+  z-index: 6;
+  pointer-events: auto;
+}
+.prod-floating.hidden { display: none; }
+.prod-floating .prod-tabs { display: flex; border-bottom: 1px solid var(--line-dim); }
+.prod-floating .prod-tabs button {
+  flex: 1;
+  padding: 5px 4px;
+  border: none;
+  border-right: 1px solid var(--line-dim);
+  background: var(--panel-2);
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.prod-floating .prod-tabs button.active { color: var(--amber-hi); background: rgba(227, 165, 52, 0.16); }
+.prod-floating .prod-body { padding: 8px 10px; overflow-y: auto; }

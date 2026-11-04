@@ -824,19 +824,29 @@ export class UnitManager {
       .sort((a, b) => (b.capital ? 1 : 0) - (a.capital ? 1 : 0) || b.pop - a.pop);
     const fallbackCity: CityMeta = { name: country.name, country: a3, pop: country.population, capital: true, pos: country.label };
     if (!cities.length) cities.push(fallbackCity);
-    const bases = cities.slice(0, isPlayer ? 4 : 2);
+    let bases = cities.slice(0, isPlayer ? 4 : 2);
+    // Kleines Szenario (Phase 5): Aufstellung an der Frontstellung (spawn) und am Hauptquartier statt in Großstädten
+    const scen = this.geo.meta.scenario?.nations.find((nn) => nn.a3 === a3);
+    const theatre = !!scen;
+    if (scen) {
+      bases = [
+        { name: 'Frontstellung', country: a3, pop: 0, capital: false, pos: scen.spawn },
+        { name: 'Hauptquartier', country: a3, pop: 0, capital: true, pos: scen.hq },
+      ];
+    }
 
     // --- Zusammensetzung
     const n = (v: number, div: number, min: number, max: number) => clamp(Math.round(v / div), min, max);
-    const P = isPlayer;
+    const P = isPlayer || theatre;
     const list: string[] = [];
     const add = (id: string, count: number) => {
       for (let i = 0; i < count; i++) list.push(id);
     };
-    const tanks = P ? n(st.tanks, 100, 2, 10) : n(st.tanks, 300, 1, 4);
-    const ifvs = P ? n(st.ifv, 200, 2, 10) : n(st.ifv, 600, 1, 4);
-    const inf = P ? n(st.manpower, 12, 4, 16) : n(st.manpower, 40, 2, 6);
-    const art = P ? n(st.artillery, 80, 1, 6) : n(st.artillery, 300, 1, 2);
+    // Theater-Szenario: alle Nationen stellen eine vollwertige, nach Profil skalierte Streitmacht (gleiche Augenhöhe)
+    const tanks = theatre ? n(st.tanks, 6, 2, 12) : P ? n(st.tanks, 100, 2, 10) : n(st.tanks, 300, 1, 4);
+    const ifvs = theatre ? n(st.ifv, 9, 2, 10) : P ? n(st.ifv, 200, 2, 10) : n(st.ifv, 600, 1, 4);
+    const inf = theatre ? n(st.manpower, 2, 4, 14) : P ? n(st.manpower, 12, 4, 16) : n(st.manpower, 40, 2, 6);
+    const art = theatre ? n(st.artillery, 5, 2, 6) : P ? n(st.artillery, 80, 1, 6) : n(st.artillery, 300, 1, 2);
     const heavy = Math.ceil(tanks * 0.5);
     add('mbt_heavy', heavy);
     add('mbt_medium', tanks - heavy);

@@ -82,7 +82,6 @@ interface ConvoyRt {
 interface FieldRt {
   info: OilFieldInfo;
   cutCheckAt: number;
-  cutRetryAt: number;
   fireClock: number;
   lastEmitIntegrity: number;
 }
@@ -142,6 +141,7 @@ export class OilEconomy {
     this.offs.push(
       bus.on('unit:killed', (e) => this.onKilled(e.id, e.killerId)),
       bus.on('unit:removed', ({ id }) => this.onRemoved(id)),
+      bus.on('nav:edge', () => { for (const fr of this.frt.values()) fr.cutCheckAt = Math.min(fr.cutCheckAt, this.time); }),
       bus.on('combat:impact', (e) => this.onImpact(e.weapon, e.x, e.z, e.radiusKm)),
       bus.on('combat:explosion', (e) => {
         const d = EXPLOSION_DMG[e.size] ?? 0;
@@ -153,6 +153,10 @@ export class OilEconomy {
   dispose(): void {
     for (const f of this.offs) f();
     this.offs.length = 0;
+  }
+
+  isHostile(a: string, b: string): boolean {
+    return this.war.isHostile(a, b);
   }
 
   setCivil(port: CivilPort | null): void {
@@ -201,7 +205,7 @@ export class OilEconomy {
         integrity: 1, stored: 0, capacity: Math.round(o.output * 10 + 100), destBaseId: -1, cutOff: false, captureProgress: 0,
       };
       this.fields.push(info);
-      this.frt.set(info.id, { info, cutCheckAt: 0, cutRetryAt: 0, fireClock: 0, lastEmitIntegrity: 1 });
+      this.frt.set(info.id, { info, cutCheckAt: 0, fireClock: 0, lastEmitIntegrity: 1 });
       if (owner) info.destBaseId = this.nearestBase(owner, 'refinery', info.x, info.z)?.id ?? -1;
     }
     for (const o of this.owners) {
@@ -384,6 +388,11 @@ export class OilEconomy {
     return b;
   }
 
+  /** Ist ein Wiederaufbau von HQ/Raffinerie möglich (Standort bekannt, nicht vorhanden)? */
+  canRebuild(owner: string, kind: 'hq' | 'refinery'): boolean {
+    return !!this.homes.get(owner)?.[kind] && this.countBases(owner, kind) === 0;
+  }
+
   /** Zerstörte Raffinerie/HQ erneut aufbauen (kostet Fässer; Bau läuft automatisch mit der Basismannschaft + Pionieren) */
   rebuildBase(owner: string, kind: 'hq' | 'refinery'): { ok: boolean; reason?: string } {
     const home = this.homes.get(owner)?.[kind];
@@ -547,7 +556,7 @@ export class OilEconomy {
     return this.nearestBase(owner, 'refinery', x, z) ?? this.nearestBase(owner, 'hq', x, z);
   }
 
-  private sendTo(c: ConvoyInfo, u: Unit, x: number, z: number): void {
+  private sendTo(_c: ConvoyInfo, u: Unit, x: number, z: number): void {
     this.units.issueMove([u.id], x, z, { formation: 'column' });
   }
 
@@ -672,7 +681,6 @@ export class OilEconomy {
   // ------------------------------------------------------------------ Disposition
 
   private dispatch(): void {
-    let budget = 3;
     for (const owner of this.owners) {
       let idle: ConvoyRt[] | null = null;
       const own = this.fields.filter((f) => f.owner === owner && f.integrity >= 0.05);
@@ -683,11 +691,9 @@ export class OilEconomy {
         let reserved = 0;
         for (const rt of this.crt.values()) if (rt.info.owner === owner && rt.info.fieldId === f.id && (rt.info.state === 'toField' || rt.info.state === 'loading') && rt.info.cargo === 0) reserved += TRUCK_CAPACITY;
         if (f.stored - reserved < LOAD_MIN) continue;
-        const fr = this.frt.get(f.id)!;
-        if (this.time < fr.cutRetryAt) continue;
+        if (f.cutOff) continue;
         if (!idle) idle = [...this.crt.values()].filter((r) => r.info.owner === owner && r.info.state === 'idle' && this.units.get(r.info.unitId));
         if (!idle.length) break;
-        if (budget <= 0) return;
         // nächster freier Konvoi
         let bi = -1, bd = Infinity;
         for (let i = 0; i < idle.length; i++) {
@@ -699,13 +705,6 @@ export class OilEconomy {
         const u = this.units.get(rt.info.unitId)!;
         const dest = this.destFor(owner, f.x, f.z);
         if (!dest) { f.cutOff = true; continue; }
-        budget -= 2;
-        if (!this.routeOk(u.x, u.z, f.x, f.z) || !this.routeOk(f.x, f.z, dest.x, dest.z)) {
-          f.cutOff = true;
-          fr.cutRetryAt = this.time + RETRY_HOURS;
-          continue;
-        }
-        f.cutOff = false;
         f.destBaseId = dest.id;
         idle.splice(bi, 1);
         rt.info.state = 'toField';
@@ -717,15 +716,15 @@ export class OilEconomy {
       }
     }
     // Erreichbarkeit zyklisch prüfen (ein Feld je Aufruf)
-    if (budget > 0) {
+    {
       for (const fr of this.frt.values()) {
         const f = fr.info;
         if (this.time < fr.cutCheckAt || !f.owner) continue;
-        fr.cutCheckAt = this.time + RETRY_HOURS;
+        fr.cutCheckAt = this.time + 3;
         const home = this.destFor(f.owner, f.x, f.z);
         if (!home) { f.cutOff = true; break; }
-        f.cutOff = !(this.routeOk(home.x, home.z, f.x, f.z) && this.routeOk(f.x, f.z, home.x, home.z));
-        break;
+        f.cutOff = !this.routeOk(home.x, home.z, f.x, f.z);
+        break; // höchstens ein Feld je Aufruf
       }
     }
   }
@@ -768,7 +767,7 @@ export class OilEconomy {
     f.destBaseId = this.nearestBase(by, 'refinery', f.x, f.z)?.id ?? -1;
     this.pool(by);
     const fr = this.frt.get(f.id);
-    if (fr) { fr.cutRetryAt = 0; fr.cutCheckAt = 0; }
+    if (fr) { fr.cutCheckAt = 0; }
     // Konvois des alten Besitzers, die dorthin unterwegs sind, zurückrufen
     for (const rt of this.crt.values()) {
       const c = rt.info;

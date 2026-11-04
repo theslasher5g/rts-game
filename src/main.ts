@@ -164,8 +164,11 @@ async function boot() {
     ctl.enabled = true;
     unitPanel.show();
     if (civilToggle) civilToggle.style.display = '';
+    for (const [a, b] of state.scenarioWars()) war.declare(a, b);
     for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
-    if (c) rts.focus(c.label[0], c.label[1], Math.min(2200, Math.max(500, Math.sqrt(c.cells * 4) * 2.2)));
+    const hq = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3)?.hq;
+    if (hq) rts.focus(hq[0], hq[1], 80);
+    else if (c) rts.focus(c.label[0], c.label[1], 80);
   });
 
   // Hover jedes Frame neu bestimmen (auch wenn sich nur die Kamera bewegt) – Picking kostet ~µs.

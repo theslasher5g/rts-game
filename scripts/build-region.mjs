@@ -362,7 +362,6 @@ const water = new Uint8Array(N); // 1 See, 2 Fluss
   let nl = 0;
   for (let k = 0; k < N; k++) if (lakeMask[k] && lc.sizes[lc.lab[k]] >= 140 && lc.sizes[lc.lab[k]] <= 4000) { water[k] = 1; }
   for (const s of lc.sizes) if (s >= 160) nl++;
-  if (process.env.LAKEDBG) { const info = lc.sizes.map(() => ({ n: 0, d: 0, x: 0, y: 0 })); for (let k = 0; k < N; k++) if (lakeMask[k]) { const o = info[lc.lab[k]]; o.n++; o.d = Math.max(o.d, fill[k] - heights[k]); o.x += k % W; o.y += (k / W) | 0; } info.filter((o) => o.n >= 160).sort((a, b) => b.n - a.n).forEach((o) => console.log("lake", o.n, o.d.toFixed(1), Math.round(o.x / o.n), Math.round(o.y / o.n))); }
   log(`Seen: ${nl}`);
 }
 const wet = new Uint8Array(N); // Meer, See, Fluss
@@ -600,7 +599,7 @@ NATIONS.forEach((n, ni) => {
   const cap = mine.find((c) => c.capital);
   cap.pop = Math.round((430 + rnd() * 440) / 5) * 5000;
   const rest = mine.filter((c) => !c.capital).sort((a, b) => 0 + (rnd() - 0.5));
-  rest.forEach((c, i) => { c.pop = Math.max(15000, Math.round((cap.pop * Math.pow(i + 2, -1.15) * (0.7 + rnd() * 0.6)) / 1000) * 1000); });
+  rest.forEach((c, i) => { c.pop = Math.max(15000, Math.round((cap.pop * Math.pow(i + 2, -1.55) * (0.55 + rnd() * 0.9)) / 1000) * 1000); });
 });
 if (cities.length < 14 || cities.length > 18) log(`WARNUNG: ${cities.length} Städte`);
 
@@ -735,6 +734,14 @@ for (let k = 0; k < N; k++) {
     P[p][k] = water[k] === 2 ? PEN_RIVER[p] : water[k] === 1 ? PEN_LAKE[p] : 0;
   }
 }
+// Uferstreifen meiden (Straße soll nicht am Ufer entlang schrammen und dabei „Brücken“ bilden)
+for (let k = 0; k < N; k++) {
+  if (inland[k] || sea[k]) continue;
+  const x = k % W, y = (k / W) | 0;
+  let bank = false;
+  for (let d = 0; d < 8 && !bank; d++) { const nx = x + DX[d], ny = y + DY[d]; if (nx >= 0 && ny >= 0 && nx < W && ny < H && inland[ny * W + nx]) bank = true; }
+  if (bank) for (let p = 0; p < 3; p++) P[p][k] += 0.6;
+}
 const dirIndex = new Int8Array(9);
 for (let d = 0; d < 8; d++) dirIndex[(DX[d] + 1) * 3 + (DY[d] + 1)] = d;
 const pairKey = (a, b) => (a < b ? a * N + b : b * N + a);
@@ -742,6 +749,7 @@ const mkLayer = () => ({ netDir: new Uint8Array(N), pairs: new Map(), terminals:
 const roadL = mkLayer(), railL = mkLayer();
 const dist = new Float64Array(N), prev = new Int32Array(N);
 const heap = new Heap(1 << 20);
+let XP = null; // Zusatzstrafe je Zelle (für Ausweichrouten)
 /** Dijkstra; Ziel = Zelle, Maske (nicht 0) oder Menge (alle abarbeiten). Rückgabe: Endzelle oder -1 */
 function search(srcs, prof, L, disc, target, mask, allSet) {
   dist.fill(Infinity); heap.clear();
@@ -761,6 +769,7 @@ function search(srcs, prof, L, disc, target, mask, allSet) {
       if (fn === Infinity) continue;
       let step = DLEN[d] * CELL * 0.5 * (fc + fn);
       if ((nb >> d) & 1) step *= disc; else step += Pp[n];
+      if (XP) step += XP[n];
       const nd = dc + step;
       if (nd < dist[n]) { dist[n] = nd; prev[n] = c; heap.push(nd, n); }
     }
@@ -768,7 +777,11 @@ function search(srcs, prof, L, disc, target, mask, allSet) {
   return -1;
 }
 function pathTo(end) { const p = []; for (let c = end; c >= 0; c = prev[c]) p.push(c); return p.reverse(); }
+const crossings = [];
 function addPath(path, cls, L) {
+  if (L === roadL && cls <= C_SECOND) {
+    for (let i = 1; i + 1 < path.length; i++) if (inland[path[i]] && !inland[path[i - 1]]) { let j = i; while (j + 1 < path.length && inland[path[j]]) j++; crossings.push([path[i - 1], path[j]]); }
+  }
   for (let i = 0; i + 1 < path.length; i++) {
     const a = path[i], b = path[i + 1];
     const d = dirIndex[(cx(b) - cx(a) + 1) * 3 + (cy(b) - cy(a) + 1)];
@@ -846,6 +859,64 @@ for (const e of edgeList) {
   const big = cities[e.i].capital || cities[e.j].capital || cities[e.i].pop + cities[e.j].pop > 330000;
   routeP2P(cities[e.i].cell, cities[e.j].cell, big ? C_PRIMARY : C_SECOND, roadL, 0);
 }
+// Ausweichrouten: zweite Trasse mit anderem Flussübergang (Redundanz; einige Engpässe bleiben)
+let altCount = 0;
+function altRoute(a, b, cls) {
+  const e = search([a], 0, roadL, 0.22, b, null, null);
+  if (e < 0) return;
+  const base = dist[e];
+  const p = pathTo(e);
+  const zone = new Float32Array(N);
+  let any = false;
+  for (const c of p) {
+    if (!inland[c]) continue;
+    any = true;
+    const x0 = cx(c), y0 = cy(c);
+    for (let dy = -14; dy <= 14; dy++) for (let dx = -14; dx <= 14; dx++) {
+      const nx = x0 + dx, ny = y0 + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H || dx * dx + dy * dy > 196) continue;
+      if (inland[ny * W + nx]) zone[ny * W + nx] = 90;
+    }
+  }
+  XP = zone;
+  const e2 = search([a], 0, roadL, 0.6, b, null, null);
+  XP = null;
+  if (e2 < 0 || dist[e2] > base * 6.5) return;
+  addPath(pathTo(e2), cls, roadL);
+  altCount++;
+}
+for (const e of edgeList) {
+  const big = cities[e.i].capital || cities[e.j].capital || cities[e.i].pop + cities[e.j].pop > 330000;
+  if ((big || e.kind === 'xb') && rnd() < 0.7) altRoute(cities[e.i].cell, cities[e.j].cell, big ? C_SECOND : C_ROAD);
+}
+log(`Ausweichrouten: ${altCount}`);
+// Umgehungen: zu den Flussübergängen der Hauptstraßen zweite Übergänge (nicht überall -> einige Engpässe bleiben)
+{
+  const done = [];
+  let made = 0, tried = 0, skipped = 0;
+  const cross = crossings.slice().sort(() => rnd() - 0.5);
+  for (const [a, b] of cross) {
+    const mx = (kmX(a) + kmX(b)) / 2, mz = (kmZ(a) + kmZ(b)) / 2;
+    if (done.some(([x, z]) => Math.hypot(x - mx, z - mz) < 1)) continue;
+    done.push([mx, mz]);
+    if (skipped < 3 || rnd() < 0.2) { skipped++; continue; } // bewusst ohne Umgehung -> Engpässe
+    tried++;
+    const zone = new Float32Array(N);
+    const x0 = cx(a), y0 = cy(a);
+    for (let dy = -26; dy <= 26; dy++) for (let dx = -26; dx <= 26; dx++) {
+      const nx = x0 + dx, ny = y0 + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H || dx * dx + dy * dy > 676) continue;
+      if (inland[ny * W + nx]) zone[ny * W + nx] = 400;
+    }
+    XP = zone;
+    const e2 = search([a], 0, roadL, 0.35, b, null, null);
+    XP = null;
+    if (e2 < 0 || dist[e2] > 330) continue;
+    addPath(pathTo(e2), C_SECOND, roadL);
+    made++;
+  }
+  log(`Umgehungen: ${made}/${tried} (Übergänge ${done.length})`);
+}
 // HQ & Raffinerie
 startPos.forEach((sp, ni) => {
   routeP2P(sp.hq, cities[capIdx[ni]].cell, C_SECOND, roadL, 0);
@@ -877,7 +948,7 @@ log(`Netz-Routen fertig (Schiene ${railCount})`);
 
 // ---- Graph bauen
 const nodePos = []; const nodeOfCell = new Map();
-const nodeAt = (cell) => { let id = nodeOfCell.get(cell); if (id === undefined) { id = nodePos.length; nodePos.push(kmX(cell), kmZ(cell)); nodeOfCell.set(cell, id); } return id; };
+const nodeAt = (cell) => { let id = nodeOfCell.get(cell); if (id === undefined) { id = nodePos.length / 2; nodePos.push(kmX(cell), kmZ(cell)); nodeOfCell.set(cell, id); } return id; };
 const newNode = (x, z) => { nodePos.push(x, z); return nodePos.length / 2 - 1; };
 const outEdges = [];
 const popc = (b) => { let n = 0; while (b) { n += b & 1; b >>= 1; } return n; };
@@ -935,7 +1006,7 @@ function subPoly(pts, s0, s1) {
   return dp(out.length >= 4 ? out : [a[0], a[1], b[0], b[1]], 0.0001);
 }
 const wetAtKm = (x, z) => inland[cellAt(x, z)] === 1;
-const MAX_EDGE_KM = 1.5, BRIDGE_MIN_KM = 0.16, BRIDGE_PAD = 0.07;
+const MAX_EDGE_KM = 1.1, BRIDGE_MIN_KM = 0.16, BRIDGE_PAD = 0.07;
 function emitChain(cellsPath, cls, aNode, bNode) {
   let pts = [];
   for (const c of cellsPath) pts.push(kmX(c), kmZ(c));
@@ -946,10 +1017,13 @@ function emitChain(cellsPath, cls, aNode, bNode) {
   // Brückenintervalle
   const iv = [];
   const step = 0.04;
+  const wetPts = [];
+  for (const c of cellsPath) if (inland[c]) wetPts.push(kmX(c), kmZ(c));
+  const nearWetPath = (x, z) => { for (let i = 0; i < wetPts.length; i += 2) if (Math.abs(wetPts[i] - x) < 0.5 && Math.abs(wetPts[i + 1] - z) < 0.5) return true; return false; };
   let inWet = false, s0 = 0;
   for (let s = 0; s <= L + 1e-9; s += step) {
     const [x, z] = pointAt(pts, Math.min(s, L));
-    const w = wetAtKm(x, z);
+    const w = wetPts.length > 0 && wetAtKm(x, z) && nearWetPath(x, z);
     if (w && !inWet) { inWet = true; s0 = s; }
     if (!w && inWet) { inWet = false; iv.push([s0, s]); }
   }
@@ -980,7 +1054,6 @@ function emitChain(cellsPath, cls, aNode, bNode) {
     // Endpunkte exakt auf Knoten
     sp[0] = nodePos[prevNode * 2]; sp[1] = nodePos[prevNode * 2 + 1];
     sp[sp.length - 2] = nodePos[endNode * 2]; sp[sp.length - 1] = nodePos[endNode * 2 + 1];
-    if (sp.some((v) => !isFinite(v)) && !globalThis.__dbg) { globalThis.__dbg = 1; console.log("NANDBG", a, b, br, L, JSON.stringify(pts).slice(0, 300), JSON.stringify(sp), prevNode, endNode, last, nodePos.slice(prevNode * 2, prevNode * 2 + 2), nodePos.slice(endNode * 2, endNode * 2 + 2)); }
     outEdges.push({ a: prevNode, b: endNode, cls, bridge: br, geom: sp });
     prevNode = endNode;
   });
@@ -1039,7 +1112,6 @@ for (const e of outEdges) {
   e.len = polyLen(e.geom);
 }
 
-{ const bad = outEdges.filter((e) => !isFinite(e.len)); console.log("BAD", bad.length, bad[0] && JSON.stringify(bad[0]).slice(0, 300)); }
 // ---------------------------------------------------------------- 6) Ausgabe: roads.bin
 const nNodes = nodePos.length / 2, nEdges = outEdges.length;
 {
@@ -1062,7 +1134,7 @@ for (const c of ROAD_CLASSES) stats.perClass[c] = { edges: 0, km: 0 };
 for (const e of outEdges) {
   const c = ROAD_CLASSES[e.cls];
   stats.perClass[c].edges++; stats.perClass[c].km += e.len; stats.totalKm += e.len;
-  if (e.bridge) { stats.bridges++; stats.bridgesKm += e.len; }
+  if (e.bridge) { stats.bridges++; stats.bridgesKm += e.len; if (e.cls === C_RAIL) stats.railBridges = (stats.railBridges ?? 0) + 1; }
 }
 for (const c of ROAD_CLASSES) stats.perClass[c].km = Math.round(stats.perClass[c].km);
 stats.totalKm = Math.round(stats.totalKm); stats.bridgesKm = Math.round(stats.bridgesKm * 10) / 10;
