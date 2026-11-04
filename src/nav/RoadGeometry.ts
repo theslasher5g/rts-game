@@ -18,7 +18,7 @@ import { cityRadiusKm } from '../world/Cities';
 export const TILE_KM = 6;
 export const STEP_KM = 0.0625;
 /** Straßenmaßstab: Faktor je km Kameraabstand und Obergrenze */
-export const SCALE_K = 0.6;
+export const SCALE_K = 0.9;
 export const SCALE_MAX = 14;
 
 // ----------------------------------------------------------------------- Hash

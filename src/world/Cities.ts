@@ -3,14 +3,21 @@ import type { GeoData } from './GeoData';
 import type { Settings } from '../core/types';
 import { bus } from '../core/EventBus';
 import type { BuildingInfo } from '../combat/types';
-import { SUN_COLOR, SUN_DIR } from './Terrain';
+import {
+  BT, BT_COUNT, FAR_TOP, RUBBLE_VARIANTS, GEO_ATTRS, STYLE_SHIFT, getModels, getFarGeo, getBuildingMaterial, rngFrom, terrainHeightKm,
+  type BuildingMaterial,
+} from './BuildingModels';
+import { BuildingFires, DecalSet, DECAL, StreetLife, setDecalParams, setPropParams, type StreetGrid } from './StreetProps';
+
+export { BT, BT_COUNT, getBuildingMaterial, rngFrom, terrainHeightKm };
+export type { BuildingMaterial };
 
 /** Ab dieser Kamerahöhe (km) werden Gebäude ausgeblendet und nur Marker gezeigt */
 const HIDE_DISTANCE = 2500;
 /** Ab dieser Kamerahöhe werden auch die Marker ausgeblendet */
 const MARKER_MAX_DISTANCE = 9000;
 /** Kachel-Abstand (km) bis zu dem die detaillierten Gebäudemodelle gezeichnet werden */
-const LOD0_DIST = 48;
+const LOD0_DIST = 36;
 /** Kachel-Abstand (km) bis zu dem die einfachen Quader gezeichnet werden */
 const LOD1_DIST = 1800;
 /** Kachelgröße (km) für Culling/LOD */
@@ -20,8 +27,10 @@ const TILE_KM = 6;
 export const STRIDE = 8;
 /** Raum-Hash-Zellgröße (km) */
 const HASH_CELL = 1;
-/** Ab dieser Integrität gilt ein Gebäude als beschädigt (dunkler/schief) */
+/** Ab dieser Integrität gilt ein Gebäude als schwer beschädigt (Ruine) */
 export const BUILDING_DAMAGED_BELOW = 0.35;
+/** Ab dieser Integrität leicht beschädigt (Ruß, zerbrochene Fenster, fehlende Ziegel) */
+export const BUILDING_LIGHT_BELOW = 0.75;
 /** Trümmerhöhe relativ zur Originalhöhe und absolutes Minimum (km) */
 const RUBBLE_FRAC = 0.12;
 const RUBBLE_MIN_H = 0.008;
@@ -29,527 +38,10 @@ const RUBBLE_COLOR = 0x3f3b36;
 /** Gebäude-Einsenkung in den Boden (km) */
 const SINK = 0.03;
 
-/** Gebäudetypen (Index = Prototyp) */
-export const BT = {
-  OLD: 0, // Altbau, Satteldach, Schornsteine, Gauben
-  HIP: 1, // Walmdach (Mittelmeer / Villen)
-  MID: 2, // Wohn-/Bürobau, Flachdach
-  PLATTE: 3, // Plattenbau-Riegel
-  HALL: 4, // Industriehalle mit Sheddach
-  SILO: 5,
-  STACK: 6, // Schornstein
-  TOWER: 7, // Hochhaus mit gestuftem Abschluss
-  CHURCH: 8, // Kirche mit Spitzturm
-  WARE: 9, // Lagerhalle
-  VILLA: 10, // Einfamilienhaus
-  BARN: 11, // Scheune
-} as const;
-export const BT_COUNT = 12;
-/** Höhenanteil der einfachen LOD1-Quader je Typ */
-const FAR_TOP = [0.8, 0.8, 0.93, 0.95, 0.65, 0.8, 1, 0.96, 0.5, 0.85, 0.75, 0.7];
-
-/** Deterministischer RNG (mulberry32) */
-export function rngFrom(name: string): () => number {
-  let h = 2166136261;
-  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
-  let a = h >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 /** Ausdehnung (km) der Bebauung einer Stadt – auch für Vegetations-/Dorf-Ausschluss */
 export function cityRadiusKm(pop: number, capital: boolean): number {
   const popM = Math.max(0.02, pop / 1e6);
   return Math.min(9, 0.9 + Math.sqrt(popM) * 1.5 + (capital ? 0.3 : 0));
-}
-
-function cornerH(hs: Float32Array, W: number, H: number, i: number, j: number): number {
-  const i0 = i < 1 ? 0 : i > W ? W - 1 : i - 1;
-  const i1 = i < 0 ? 0 : i > W - 1 ? W - 1 : i;
-  const j0 = j < 1 ? 0 : j > H ? H - 1 : j - 1;
-  const j1 = j < 0 ? 0 : j > H - 1 ? H - 1 : j;
-  return 0.25 * (hs[j0 * W + i0] + hs[j0 * W + i1] + hs[j1 * W + i0] + hs[j1 * W + i1]);
-}
-
-/**
- * Höhe (km) der GPU-Geländeoberfläche (Gitterpunkte = Mittel der 4 Rasterzellen darum, dazwischen bilinear) –
- * für Dekale/Gebäude, die exakt auf dem gerenderten Gelände sitzen sollen (geo.heightAt weicht an Hängen ab).
- */
-export function terrainHeightKm(geo: GeoData, x: number, z: number): number {
-  const gx = x / geo.cellKm, gz = z / geo.cellKm;
-  const i = Math.floor(gx), j = Math.floor(gz);
-  const fx = gx - i, fz = gz - j;
-  const hs = geo.heightsKm, W = geo.width, H = geo.height;
-  const a = cornerH(hs, W, H, i, j), b = cornerH(hs, W, H, i + 1, j);
-  const c = cornerH(hs, W, H, i, j + 1), d = cornerH(hs, W, H, i + 1, j + 1);
-  return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
-}
-
-// ====================================================================== Prototypen-Geometrie
-
-type V3 = [number, number, number];
-
-/** Kleiner Geometrie-Baukasten. Attribute: position, normal, uv, aSurf(Fassade,Achse,Teil), aSize(Breiten-/Höhenanteil) */
-class GB {
-  p: number[] = [];
-  n: number[] = [];
-  uv: number[] = [];
-  s: number[] = [];
-  z: number[] = [];
-  i: number[] = [];
-
-  private emit(P: V3[], UV: number[][], nrm: V3, flip: boolean, f: number, axis: number, part: number, sw: number, sh: number): void {
-    const base = this.p.length / 3;
-    for (let k = 0; k < P.length; k++) {
-      this.p.push(P[k][0], P[k][1], P[k][2]);
-      this.n.push(nrm[0], nrm[1], nrm[2]);
-      this.uv.push(UV[k][0], UV[k][1]);
-      this.s.push(f, axis, part);
-      this.z.push(sw, sh);
-    }
-    if (P.length === 4) {
-      if (!flip) this.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
-      else this.i.push(base, base + 2, base + 1, base, base + 3, base + 2);
-    } else if (!flip) this.i.push(base, base + 1, base + 2);
-    else this.i.push(base, base + 2, base + 1);
-  }
-
-  private static normal(a: V3, b: V3, c: V3, hint: V3): { n: V3; flip: boolean } {
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    const l = Math.hypot(nx, ny, nz) || 1;
-    nx /= l; ny /= l; nz /= l;
-    const flip = nx * hint[0] + ny * hint[1] + nz * hint[2] < 0;
-    return { n: flip ? [-nx, -ny, -nz] : [nx, ny, nz], flip };
-  }
-
-  /** a->b = u-Richtung (horizontal), a->d = v-Richtung */
-  quad(a: V3, b: V3, c: V3, d: V3, hint: V3, f: number, axis: number, part: number, sw = 1, sh = 1): void {
-    const { n, flip } = GB.normal(a, b, d, hint);
-    this.emit([a, b, c, d], [[0, 0], [1, 0], [1, 1], [0, 1]], n, flip, f, axis, part, sw, sh);
-  }
-
-  tri(a: V3, b: V3, c: V3, hint: V3, f: number, axis: number, part: number, sw = 1, sh = 1): void {
-    const { n, flip } = GB.normal(a, b, c, hint);
-    this.emit([a, b, c], [[0, 0], [1, 0], [0.5, 1]], n, flip, f, axis, part, sw, sh);
-  }
-
-  box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, o: { f?: number; endF?: number; part?: number; top?: number; topPart?: number } = {}): void {
-    const f = o.f ?? -1, ef = o.endF ?? f, part = o.part ?? 0;
-    const sx = x1 - x0, sz = z1 - z0, sy = y1 - y0;
-    this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], f, 0, part, sx, sy);
-    this.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], f, 0, part, sx, sy);
-    this.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], ef, 1, part, sz, sy);
-    this.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], ef, 1, part, sz, sy);
-    if (o.top !== 0) this.quad([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], -1, 0, o.topPart ?? 1);
-  }
-
-  /** Satteldach, First entlang x */
-  gable(x0: number, x1: number, ye: number, yr: number, z0: number, z1: number, endPart = 0, zr = (z0 + z1) / 2): void {
-    this.quad([x0, ye, z1], [x1, ye, z1], [x1, yr, zr], [x0, yr, zr], [0, 1, 1], -1, 0, 1);
-    this.quad([x1, ye, z0], [x0, ye, z0], [x0, yr, zr], [x1, yr, zr], [0, 1, -1], -1, 0, 1);
-    this.tri([x1, ye, z1], [x1, ye, z0], [x1, yr, zr], [1, 0, 0], -1, 0, endPart);
-    this.tri([x0, ye, z0], [x0, ye, z1], [x0, yr, zr], [-1, 0, 0], -1, 0, endPart);
-  }
-
-  /** Walmdach */
-  hip(x0: number, x1: number, ye: number, yr: number, z0: number, z1: number, rl: number): void {
-    const zm = (z0 + z1) / 2, xm = (x0 + x1) / 2;
-    this.quad([x0, ye, z1], [x1, ye, z1], [xm + rl, yr, zm], [xm - rl, yr, zm], [0, 1, 1], -1, 0, 1);
-    this.quad([x1, ye, z0], [x0, ye, z0], [xm - rl, yr, zm], [xm + rl, yr, zm], [0, 1, -1], -1, 0, 1);
-    this.tri([x1, ye, z1], [x1, ye, z0], [xm + rl, yr, zm], [1, 1, 0], -1, 0, 1);
-    this.tri([x0, ye, z0], [x0, ye, z1], [xm - rl, yr, zm], [-1, 1, 0], -1, 0, 1);
-  }
-
-  /** Pyramide (Spitzturm) */
-  pyramid(cx: number, cz: number, hx: number, hz: number, y0: number, y1: number, part: number): void {
-    const A: V3 = [cx, y1, cz];
-    const c00: V3 = [cx - hx, y0, cz - hz], c10: V3 = [cx + hx, y0, cz - hz], c11: V3 = [cx + hx, y0, cz + hz], c01: V3 = [cx - hx, y0, cz + hz];
-    this.tri(c01, c11, A, [0, 0.3, 1], -1, 0, part);
-    this.tri(c10, c00, A, [0, 0.3, -1], -1, 0, part);
-    this.tri(c11, c10, A, [1, 0.3, 0], -1, 0, part);
-    this.tri(c00, c01, A, [-1, 0.3, 0], -1, 0, part);
-  }
-
-  /** Zylinder/Kegelstumpf mit n Seiten, Mittelpunkt (cx,cz) */
-  tube(cx: number, cz: number, y0: number, y1: number, r0: number, r1: number, n: number, part: number, cap: number): void {
-    for (let k = 0; k < n; k++) {
-      const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2;
-      const am = (a0 + a1) / 2;
-      const hint: V3 = [Math.cos(am), 0.05, Math.sin(am)];
-      this.quad(
-        [cx + Math.cos(a1) * r0, y0, cz + Math.sin(a1) * r0], [cx + Math.cos(a0) * r0, y0, cz + Math.sin(a0) * r0],
-        [cx + Math.cos(a0) * r1, y1, cz + Math.sin(a0) * r1], [cx + Math.cos(a1) * r1, y1, cz + Math.sin(a1) * r1],
-        hint, -1, 0, part, 1, 1,
-      );
-      if (cap >= 0) this.tri([cx + Math.cos(a0) * r1, y1, cz + Math.sin(a0) * r1], [cx + Math.cos(a1) * r1, y1, cz + Math.sin(a1) * r1], [cx, y1, cz], [0, 1, 0], -1, 0, cap);
-    }
-  }
-
-  build(): THREE.BufferGeometry {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    g.setAttribute('aSurf', new THREE.Float32BufferAttribute(this.s, 3));
-    g.setAttribute('aSize', new THREE.Float32BufferAttribute(this.z, 2));
-    g.setIndex(this.i);
-    return g;
-  }
-}
-
-// Teile: 0 Wand (Instanzfarbe), 1 Dach (Dachfarbe), 2 dunkel (Metall/Antenne), 3 Ziegel, 4 Beton
-function protoOld(): GB {
-  const g = new GB();
-  const e = 0.62, r = 0.92;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 0, endF: -1, top: 0 });
-  g.gable(-0.5, 0.5, e, r, -0.5, 0.5);
-  g.box(-0.34, r - 0.08, -0.06, -0.26, 1.0, 0.06, { part: 3, topPart: 2 });
-  g.box(0.24, r - 0.08, -0.06, 0.32, 0.99, 0.06, { part: 3, topPart: 2 });
-  // Gaube
-  g.box(0.0, e - 0.02, 0.18, 0.15, e + 0.15, 0.3, { f: 0, endF: -1, top: 1, topPart: 1 });
-  g.box(-0.3, e - 0.02, -0.3, -0.16, e + 0.14, -0.18, { f: -1, endF: -1, top: 1, topPart: 1 });
-  return g;
-}
-function protoHip(): GB {
-  const g = new GB();
-  const e = 0.6, r = 0.92;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 6, endF: 6, top: 0 });
-  g.hip(-0.5, 0.5, e, r, -0.5, 0.5, 0.2);
-  g.box(0.16, r - 0.1, -0.05, 0.25, 1.0, 0.05, { part: 3, topPart: 2 });
-  return g;
-}
-function protoMid(): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.93, 0.5, { f: 2, endF: -1, topPart: 1 });
-  g.box(-0.1, 0.93, -0.28, 0.28, 1.0, 0.12, { part: 4, topPart: 4 });
-  g.box(-0.42, 0.93, 0.2, -0.3, 0.97, 0.36, { part: 4, topPart: 4 });
-  return g;
-}
-function protoPlatte(): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.95, 0.5, { f: 1, endF: -1, topPart: 1 });
-  g.box(-0.3, 0.95, -0.2, -0.18, 1.0, 0.2, { part: 4, topPart: 4 });
-  g.box(0.2, 0.95, -0.2, 0.32, 1.0, 0.2, { part: 4, topPart: 4 });
-  return g;
-}
-function protoHall(): GB {
-  const g = new GB();
-  const e = 0.6;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 4, endF: 4, top: 0 });
-  const n = 4;
-  for (let k = 0; k < n; k++) {
-    const x0 = -0.5 + k * (1 / n), x1 = x0 + 1 / n;
-    // Schräge (Dach) steigt nach +x, senkrechte Fensterfläche (Nordlicht) fällt ab
-    g.quad([x0, e, 0.5], [x1, 0.92, 0.5], [x1, 0.92, -0.5], [x0, e, -0.5], [0, 1, 0], -1, 0, 1);
-    g.quad([x1, e, 0.5], [x1, e, -0.5], [x1, 0.92, -0.5], [x1, 0.92, 0.5], [1, 0, 0], 4, 1, 0, 1, 0.3);
-    g.tri([x0, e, 0.5], [x1, e, 0.5], [x1, 0.92, 0.5], [0, 0, 1], -1, 0, 0);
-    g.tri([x1, e, -0.5], [x0, e, -0.5], [x1, 0.92, -0.5], [0, 0, -1], -1, 0, 0);
-  }
-  g.box(-0.4, 0.58, -0.1, -0.2, 0.7, 0.1, { part: 4, topPart: 4 });
-  return g;
-}
-function protoSilo(): GB {
-  const g = new GB();
-  g.tube(0, 0, 0, 0.78, 0.5, 0.5, 8, 4, -1);
-  g.tube(0, 0, 0.78, 0.92, 0.5, 0.3, 8, 4, -1);
-  g.tube(0, 0, 0.92, 1.0, 0.3, 0.05, 8, 2, 2);
-  return g;
-}
-function protoStack(): GB {
-  const g = new GB();
-  g.tube(0, 0, 0, 0.3, 0.5, 0.42, 8, 0, -1);
-  g.tube(0, 0, 0.3, 0.55, 0.42, 0.36, 8, 3, -1);
-  g.tube(0, 0, 0.55, 0.8, 0.36, 0.31, 8, 0, -1);
-  g.tube(0, 0, 0.8, 1.0, 0.31, 0.27, 8, 3, 2);
-  return g;
-}
-function protoTower(): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.66, 0.5, { f: 3, endF: 3, topPart: 4 });
-  g.box(-0.38, 0.66, -0.38, 0.38, 0.86, 0.38, { f: 7, endF: 7, topPart: 4 });
-  g.box(-0.26, 0.86, -0.26, 0.26, 0.96, 0.26, { f: 7, endF: 7, topPart: 4 });
-  g.box(-0.04, 0.96, -0.04, 0.04, 1.0, 0.04, { part: 2, topPart: 2 });
-  g.box(-0.18, 0.96, 0.05, -0.08, 0.985, 0.17, { part: 4, topPart: 4 });
-  return g;
-}
-function protoChurch(): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.3, 0.15, 0.26, 0.3, { f: 5, endF: -1, top: 0 });
-  g.gable(-0.5, 0.15, 0.26, 0.4, -0.3, 0.3);
-  g.box(0.15, 0, -0.17, 0.5, 0.5, 0.17, { f: 5, endF: 5, topPart: 2 });
-  g.pyramid(0.325, 0, 0.17, 0.17, 0.5, 1.0, 1);
-  return g;
-}
-function protoWare(): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.8, 0.5, { f: 4, endF: -1, top: 0 });
-  g.gable(-0.5, 0.5, 0.8, 0.96, -0.5, 0.5);
-  g.box(0.3, 0.8, -0.1, 0.42, 1.0, 0.1, { part: 4, topPart: 4 });
-  return g;
-}
-function protoVilla(): GB {
-  const g = new GB();
-  const e = 0.52, r = 0.92;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 6, endF: 6, top: 0 });
-  g.gable(-0.5, 0.5, e, r, -0.5, 0.5, 0);
-  g.box(0.22, r - 0.08, -0.05, 0.3, 1.0, 0.05, { part: 3, topPart: 2 });
-  g.box(-0.24, 0, 0.5, 0.1, 0.3, 0.72, { f: 6, endF: -1, topPart: 1 });
-  return g;
-}
-function protoBarn(): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.42, 0.5, { f: -1, endF: -1, top: 0 });
-  g.gable(-0.5, 0.5, 0.42, 1.0, -0.5, 0.5, 0);
-  return g;
-}
-function protoFar(top: number): GB {
-  const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, top, 0.5, { f: -1, endF: -1, topPart: 1 });
-  return g;
-}
-
-interface Proto {
-  g0: THREE.BufferGeometry;
-  g1: THREE.BufferGeometry;
-}
-let PROTOS: Proto[] | null = null;
-let FAR_GEO: THREE.BufferGeometry | null = null;
-function getProtos(): Proto[] {
-  if (!PROTOS) {
-    const mk = [protoOld, protoHip, protoMid, protoPlatte, protoHall, protoSilo, protoStack, protoTower, protoChurch, protoWare, protoVilla, protoBarn];
-    PROTOS = mk.map((f, i) => ({ g0: f().build(), g1: protoFar(FAR_TOP[i]).build() }));
-  }
-  return PROTOS;
-}
-function getFarGeo(): THREE.BufferGeometry {
-  if (!FAR_GEO) FAR_GEO = protoFar(1).build();
-  return FAR_GEO;
-}
-
-// ====================================================================== Fensteratlas + Material
-
-const ATLAS_T = 16;
-const ATLAS_F = 8;
-
-function buildAtlas(): { tex: THREE.DataTexture; avg: THREE.Vector4[] } {
-  const W = ATLAS_T;
-  const d = new Uint8Array(W * ATLAS_T * ATLAS_F * 4);
-  const rect = (f: number, x0: number, y0: number, x1: number, y1: number, r: number, g: number, b: number, a: number) => {
-    for (let y = y0; y < y1; y++)
-      for (let x = x0; x < x1; x++) {
-        const o = ((f * ATLAS_T + y) * W + x) * 4;
-        d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = a;
-      }
-  };
-  const wall = (f: number, v: number) => rect(f, 0, 0, W, ATLAS_T, v, v, v, 0);
-  // 0 Altbau: Fensterrahmen, Sims, Sprossen
-  wall(0, 228);
-  rect(0, 4, 3, 12, 14, 255, 255, 255, 0);
-  rect(0, 3, 2, 13, 3, 200, 200, 200, 0);
-  rect(0, 5, 5, 11, 13, 14, 18, 26, 255);
-  rect(0, 7, 5, 9, 13, 235, 235, 235, 0);
-  rect(0, 5, 9, 11, 10, 235, 235, 235, 0);
-  // 1 Plattenbau: Fugen, Brüstungsband, breite Fenster
-  wall(1, 214);
-  rect(1, 0, 0, W, 1, 168, 168, 168, 0);
-  rect(1, 0, 0, 1, ATLAS_T, 168, 168, 168, 0);
-  rect(1, 1, 2, 15, 5, 160, 160, 160, 0);
-  rect(1, 3, 6, 13, 13, 16, 21, 28, 255);
-  rect(1, 8, 6, 9, 13, 220, 220, 220, 0);
-  // 2 Wohnbau mit Balkonen
-  wall(2, 232);
-  rect(2, 1, 3, 15, 5, 150, 150, 150, 0);
-  rect(2, 4, 6, 12, 14, 18, 22, 30, 255);
-  rect(2, 8, 6, 9, 14, 230, 230, 230, 0);
-  // 3 Glasfassade (Büro)
-  wall(3, 90);
-  rect(3, 0, 3, W, ATLAS_T, 52, 84, 100, 255);
-  rect(3, 0, 3, 1, ATLAS_T, 70, 70, 70, 0);
-  rect(3, 8, 3, 9, ATLAS_T, 70, 70, 70, 0);
-  // 4 Industrie: Wellblech + Fensterband
-  wall(4, 224);
-  for (let x = 0; x < W; x += 2) rect(4, x, 0, x + 1, ATLAS_T, 196, 196, 196, 0);
-  rect(4, 0, 0, W, 2, 140, 140, 140, 0);
-  rect(4, 1, 9, 15, 13, 20, 28, 32, 255);
-  // 5 Kirche: hohe Spitzbogenfenster
-  wall(5, 236);
-  rect(5, 5, 3, 11, 15, 255, 255, 255, 0);
-  rect(5, 6, 4, 10, 13, 26, 32, 52, 255);
-  rect(5, 7, 13, 9, 15, 26, 32, 52, 255);
-  // 6 Villa: Fenster mit Läden
-  wall(6, 242);
-  rect(6, 2, 5, 5, 12, 120, 130, 110, 0);
-  rect(6, 11, 5, 14, 12, 120, 130, 110, 0);
-  rect(6, 5, 5, 11, 12, 18, 24, 32, 255);
-  rect(6, 8, 5, 9, 12, 240, 240, 240, 0);
-  // 7 Turm: durchgehendes Glas
-  wall(7, 80);
-  rect(7, 0, 1, W, ATLAS_T, 70, 108, 126, 255);
-  rect(7, 0, 1, 1, ATLAS_T, 60, 60, 60, 0);
-  rect(7, 8, 1, 9, ATLAS_T, 60, 60, 60, 0);
-  const avg: THREE.Vector4[] = [];
-  for (let f = 0; f < ATLAS_F; f++) {
-    let wm = 0, gr = 0, gg = 0, gb = 0;
-    for (let y = 0; y < ATLAS_T; y++)
-      for (let x = 0; x < W; x++) {
-        const o = ((f * ATLAS_T + y) * W + x) * 4;
-        if (d[o + 3] > 127) { gr += d[o]; gg += d[o + 1]; gb += d[o + 2]; } else wm += d[o];
-      }
-    const N = W * ATLAS_T * 255;
-    avg.push(new THREE.Vector4(wm / N, gr / N, gg / N, gb / N));
-  }
-  const tex = new THREE.DataTexture(d, W, ATLAS_T * ATLAS_F, THREE.RGBAFormat, THREE.UnsignedByteType);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.generateMipmaps = false;
-  tex.colorSpace = THREE.NoColorSpace;
-  tex.needsUpdate = true;
-  return { tex, avg };
-}
-
-const B_VERT = /* glsl */ `
-#include <common>
-#include <logdepthbuf_pars_vertex>
-#include <fog_pars_vertex>
-attribute vec3 aSurf;
-attribute vec2 aSize;
-attribute vec4 aRoof;
-uniform vec3 uSunDir;
-uniform vec3 uSunColor;
-uniform float uVis;
-uniform float uWinScale;
-uniform float uHS;
-uniform float uNight;
-uniform vec2 uPitch[8];
-varying vec3 vLight;
-varying vec2 vCell;
-varying vec3 vSurf;
-varying vec3 vWall;
-varying vec3 vRoof;
-varying float vFlag;
-varying float vSeed;
-varying float vAO;
-void main() {
-  mat3 R = mat3(instanceMatrix);
-  vec3 sc = vec3(length(R[0]), length(R[1]), length(R[2]));
-  mat3 Rn = mat3(R[0] / sc.x, R[1] / sc.y, R[2] / sc.z);
-  vec3 n = normalize(Rn * (normal / sc));
-  vec3 lp = position * uVis;
-  vec4 wp = instanceMatrix * vec4(lp, 1.0);
-  vec3 amb = mix(vec3(0.24, 0.21, 0.17), vec3(0.50, 0.56, 0.66), n.y * 0.5 + 0.5) * 0.62;
-  float ndl = max(dot(n, uSunDir), 0.0);
-  vLight = (amb + uSunColor * ndl * 0.95) * 1.12 * (1.0 - 0.55 * uNight);
-  float fi = max(aSurf.x, 0.0);
-  vec2 pf = uPitch[int(fi + 0.5)];
-  float faceW = (aSurf.y < 0.5 ? sc.x : sc.z) * aSize.x;
-  float faceH = sc.y * aSize.y;
-  vCell = uv * vec2(max(1.0, floor(faceW / (pf.x * uWinScale) + 0.5)), max(1.0, floor(faceH / (pf.y * uHS * uWinScale) + 0.5)));
-  vSurf = aSurf;
-  vWall = instanceColor;
-  vRoof = aRoof.rgb;
-  vFlag = aRoof.w;
-  vSeed = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);
-  vAO = mix(0.7, 1.0, smoothstep(0.0, 0.14, position.y));
-  vec4 mvPosition = viewMatrix * wp;
-  gl_Position = projectionMatrix * mvPosition;
-  #include <logdepthbuf_vertex>
-  #include <fog_vertex>
-}
-`;
-
-const B_FRAG = /* glsl */ `
-#include <common>
-#include <logdepthbuf_pars_fragment>
-#include <fog_pars_fragment>
-uniform sampler2D uAtlas;
-uniform vec4 uAvg[8];
-uniform float uNight;
-varying vec3 vLight;
-varying vec2 vCell;
-varying vec3 vSurf;
-varying vec3 vWall;
-varying vec3 vRoof;
-varying float vFlag;
-varying float vSeed;
-varying float vAO;
-float hash21(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
-}
-void main() {
-  #include <logdepthbuf_fragment>
-  float part = vSurf.z;
-  vec3 base = vWall;
-  if (part > 0.5 && part < 1.5) base = vRoof;
-  else if (part > 1.5 && part < 2.5) base = vec3(0.045, 0.045, 0.05);
-  else if (part > 2.5 && part < 3.5) base = vec3(0.30, 0.13, 0.09);
-  else if (part > 3.5) base = vWall * 0.82 + 0.03;
-  base *= 0.93 + 0.14 * vSeed;
-  vec3 col = base;
-  vec3 emis = vec3(0.0);
-  if (vFlag > 0.5) {
-    col = base * (0.85 + 0.3 * hash21(floor(gl_FragCoord.xy * 0.5)));
-  } else if (vSurf.x > -0.5 && part < 0.5) {
-    int fi = int(vSurf.x + 0.5);
-    vec2 fw = fwidth(vCell);
-    float aa = max(fw.x, fw.y);
-    vec4 t = texture2D(uAtlas, vec2(fract(vCell.x), (float(fi) + fract(vCell.y)) / 8.0));
-    vec3 tex = t.a > 0.5 ? t.rgb : base * t.rgb;
-    vec4 av = uAvg[fi];
-    vec3 avg = base * av.x + av.yzw;
-    col = mix(tex, avg, smoothstep(0.3, 0.75, aa));
-    if (t.a > 0.5 && uNight > 0.01) {
-      vec2 cid = floor(vCell) + vSeed * 91.0;
-      float lit = step(0.58, hash21(cid)) * (1.0 - smoothstep(0.3, 0.75, aa));
-      emis = vec3(1.0, 0.78, 0.42) * lit * uNight * 1.3;
-    }
-  }
-  col *= vAO;
-  gl_FragColor = vec4(col * vLight + emis, 1.0);
-  #include <fog_fragment>
-}
-`;
-
-export interface BuildingMaterial extends THREE.ShaderMaterial {
-  uniforms: Record<string, THREE.IUniform>;
-}
-
-let SHARED_MAT: BuildingMaterial | null = null;
-/** Gemeinsames Gebäudematerial (Fensteratlas, Vertex-Licht, Nebel, logarithmischer Tiefenpuffer). */
-export function getBuildingMaterial(): BuildingMaterial {
-  if (SHARED_MAT) return SHARED_MAT;
-  const { tex, avg } = buildAtlas();
-  const pitch = [
-    [0.0105, 0.0034], [0.0115, 0.0034], [0.0105, 0.003], [0.009, 0.0038], [0.014, 0.009], [0.012, 0.01], [0.0115, 0.0033], [0.008, 0.0038],
-  ].map((p) => new THREE.Vector2(p[0], p[1]));
-  SHARED_MAT = new THREE.ShaderMaterial({
-    vertexShader: B_VERT,
-    fragmentShader: B_FRAG,
-    uniforms: {
-      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
-      uAtlas: { value: tex },
-      uAvg: { value: avg },
-      uPitch: { value: pitch },
-      uSunDir: { value: SUN_DIR.clone() },
-      uSunColor: { value: SUN_COLOR.clone() },
-      uVis: { value: 1 },
-      uWinScale: { value: 1 },
-      uHS: { value: 2.25 },
-      uNight: { value: 0 },
-    },
-    fog: true,
-  }) as BuildingMaterial;
-  SHARED_MAT.name = 'BuildingMaterial';
-  return SHARED_MAT;
 }
 
 // ====================================================================== Gebäude-Layer (Kacheln, LOD, Instanzen)
@@ -557,10 +49,15 @@ export function getBuildingMaterial(): BuildingMaterial {
 interface LTile {
   x0: number; x1: number; z0: number; z1: number;
   meshes: Array<THREE.InstancedMesh | null>;
+  /** schwer beschädigte Varianten je Typ (lazy) */
+  heavy: Array<THREE.InstancedMesh | null>;
+  /** Trümmer je Variante (lazy) */
+  rub: Array<THREE.InstancedMesh | null>;
   ids: number[][];
   far: THREE.InstancedMesh | null;
   farIds: number[];
   lod: number;
+  sphere: THREE.Sphere | null;
 }
 
 const _m = new THREE.Matrix4();
@@ -572,10 +69,18 @@ const _up = new THREE.Vector3(0, 1, 0);
 const _ax = new THREE.Vector3();
 const _col = new THREE.Color();
 const _rc = new THREE.Color();
+const _fc = new THREE.Color();
+const _fr = new THREE.Color();
+const _qq = new THREE.Quaternion();
+const HIDE16 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+
+interface VarData { free: number[]; next: number }
 
 /**
  * Gebäude-Instanzen, nach Kacheln gruppiert: je Kachel und Typ ein InstancedMesh (Detail) plus ein einfaches
- * Quader-Mesh (Fern-LOD). Daten-Layout wie Cities (STRIDE) + Typ + Dachfarbe.
+ * Quader-Mesh (Fern-LOD). Schadensstufen: intakt / leicht beschädigt (Shader: Ruß, Fenster, Ziegel) -> schwer beschädigt
+ * (eigenes Ruinenmodell) -> Trümmerhaufen (eigenes Modell). Die Ruinen-/Trümmermeshes werden bei Bedarf je Kachel angelegt.
+ * Daten-Layout wie Cities (STRIDE) + Typ + Dachfarbe (Bits 24..27 = Stil: 1 Fachwerk).
  */
 export class BuildingLayer {
   readonly group = new THREE.Group();
@@ -584,9 +89,12 @@ export class BuildingLayer {
   private readonly tileOf: Int32Array;
   private readonly slotNear: Int32Array;
   private readonly slotFar: Int32Array;
+  private readonly slotVar: Int32Array;
+  private readonly state: Uint8Array;
   private readonly mat: BuildingMaterial;
   private exag = 6;
   private readonly dirtyMeshes = new Set<THREE.InstancedMesh>();
+  private readonly models = getModels();
 
   constructor(
     readonly data: Float32Array,
@@ -597,11 +105,12 @@ export class BuildingLayer {
   ) {
     this.count = typ.length;
     this.mat = getBuildingMaterial();
-    const protos = getProtos();
     const farGeo = getFarGeo();
     this.tileOf = new Int32Array(this.count);
     this.slotNear = new Int32Array(this.count);
     this.slotFar = new Int32Array(this.count);
+    this.slotVar = new Int32Array(this.count).fill(-1);
+    this.state = new Uint8Array(this.count).fill(255);
     const map = new Map<number, number>();
     for (let i = 0; i < this.count; i++) {
       const tx = Math.floor(data[i * STRIDE] / tileKm), tz = Math.floor(data[i * STRIDE + 1] / tileKm);
@@ -610,7 +119,11 @@ export class BuildingLayer {
       if (ti === undefined) {
         ti = this.tiles.length;
         map.set(key, ti);
-        this.tiles.push({ x0: tx * tileKm, x1: (tx + 1) * tileKm, z0: tz * tileKm, z1: (tz + 1) * tileKm, meshes: new Array(BT_COUNT).fill(null), ids: Array.from({ length: BT_COUNT }, () => []), far: null, farIds: [], lod: -2 });
+        this.tiles.push({
+          x0: tx * tileKm, x1: (tx + 1) * tileKm, z0: tz * tileKm, z1: (tz + 1) * tileKm,
+          meshes: new Array(BT_COUNT).fill(null), heavy: new Array(BT_COUNT).fill(null), rub: new Array(RUBBLE_VARIANTS).fill(null),
+          ids: Array.from({ length: BT_COUNT }, () => []), far: null, farIds: [], lod: -2, sphere: null,
+        });
       }
       this.tileOf[i] = ti;
       const t = this.tiles[ti];
@@ -623,33 +136,76 @@ export class BuildingLayer {
       for (let k = 0; k < BT_COUNT; k++) {
         const n = t.ids[k].length;
         if (!n) continue;
-        const roofAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
-        const g0 = new THREE.BufferGeometry();
-        for (const name of ['position', 'normal', 'uv', 'aSurf', 'aSize']) g0.setAttribute(name, protos[k].g0.getAttribute(name));
-        g0.setIndex(protos[k].g0.getIndex());
-        g0.setAttribute('aRoof', roofAttr);
-        const mesh = new THREE.InstancedMesh(g0, this.mat, n);
-        mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
-        mesh.matrixAutoUpdate = false;
-        mesh.visible = false;
-        mesh.name = `Bld${k}`;
+        const mesh = this.makeMesh(this.models.g0[k], n, `Bld${k}`);
+        mesh.count = n;
         t.meshes[k] = mesh;
         this.group.add(mesh);
       }
-      const n = t.farIds.length;
-      const roofAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
-      const g = new THREE.BufferGeometry();
-      for (const name of ['position', 'normal', 'uv', 'aSurf', 'aSize']) g.setAttribute(name, farGeo.getAttribute(name));
-      g.setIndex(farGeo.getIndex());
-      g.setAttribute('aRoof', roofAttr);
-      const far = new THREE.InstancedMesh(g, this.mat, n);
-      far.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
-      far.matrixAutoUpdate = false;
-      far.visible = false;
-      far.name = 'BldFar';
+      const far = this.makeMesh(farGeo, t.farIds.length, 'BldFar');
+      far.count = t.farIds.length;
       t.far = far;
       this.group.add(far);
     }
+  }
+
+  private makeMesh(base: THREE.BufferGeometry, n: number, name: string): THREE.InstancedMesh {
+    const g = new THREE.BufferGeometry();
+    for (const a of GEO_ATTRS) g.setAttribute(a, base.getAttribute(a));
+    g.setIndex(base.getIndex());
+    g.setAttribute('aRoof', new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4));
+    const mesh = new THREE.InstancedMesh(g, this.mat, n);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+    mesh.matrixAutoUpdate = false;
+    mesh.visible = false;
+    mesh.name = name;
+    return mesh;
+  }
+
+  private varMesh(t: LTile, kind: 1 | 2, idx: number): THREE.InstancedMesh {
+    const arr = kind === 1 ? t.heavy : t.rub;
+    let m = arr[idx];
+    if (!m) {
+      const n = kind === 1 ? t.ids[idx].length : t.farIds.length;
+      m = this.makeMesh(kind === 1 ? this.models.gh[idx] : this.models.gr[idx], n, kind === 1 ? `BldRuin${idx}` : `BldRubble${idx}`);
+      m.count = 0;
+      m.userData = { free: [], next: 0 } as VarData;
+      m.visible = t.lod === 0;
+      if (t.sphere) m.boundingSphere = t.sphere.clone();
+      arr[idx] = m;
+      this.group.add(m);
+    }
+    return m;
+  }
+
+  private hide(m: THREE.InstancedMesh, slot: number): void {
+    (m.instanceMatrix.array as Float32Array).set(HIDE16, slot * 16);
+    this.dirtyMeshes.add(m);
+  }
+
+  private allocVar(m: THREE.InstancedMesh): number {
+    const u = m.userData as VarData;
+    const s = u.free.length ? (u.free.pop() as number) : u.next++;
+    m.count = Math.max(m.count, u.next);
+    return s;
+  }
+
+  private releaseVar(m: THREE.InstancedMesh | null, slot: number): void {
+    if (!m || slot < 0) return;
+    (m.userData as VarData).free.push(slot);
+    this.hide(m, slot);
+  }
+
+  private put(m: THREE.InstancedMesh, s: number, col: THREE.Color, rc: THREE.Color, flag: number): void {
+    _m.toArray(m.instanceMatrix.array as Float32Array, s * 16);
+    (m.instanceColor!.array as Float32Array).set([col.r, col.g, col.b], s * 3);
+    ((m.geometry.getAttribute('aRoof') as THREE.InstancedBufferAttribute).array as Float32Array).set([rc.r, rc.g, rc.b, flag], s * 4);
+    this.dirtyMeshes.add(m);
+  }
+
+  /** Schadensstufe (0 intakt/leicht, 1 Ruine, 2 Trümmer) von Instanz i */
+  damageState(i: number): number {
+    const g = this.integrity[i];
+    return g <= 0 ? 2 : g < BUILDING_DAMAGED_BELOW ? 1 : 0;
   }
 
   /** Instanz i aus Daten/Zustand neu berechnen (Matrix, Farben, Flags). */
@@ -658,47 +214,72 @@ export class BuildingLayer {
     const o = i * STRIDE, d = this.data;
     const integ = this.integrity[i];
     const hScale = 1 + (e - 1) * 0.25;
+    const rv = this.roof[i];
+    const style = (rv >>> STYLE_SHIFT) & 15;
+    const s = this.damageState(i);
+    const typ = this.typ[i];
     let sx = d[o + 2], sy = d[o + 3] * hScale + SINK, sz = d[o + 4];
     _q.setFromAxisAngle(_up, d[o + 5]);
     _col.setHex(d[o + 7]);
-    _rc.setHex(this.roof[i]);
-    let flag = 0;
-    if (integ <= 0) {
+    _rc.setHex(rv & 0xffffff);
+    _fc.copy(_col);
+    _fr.copy(_rc);
+    let flagFar = 0, syFar = sy;
+    let flag = style * 10;
+    const qq = _qq.copy(_q);
+    if (s === 2) {
       sy = RUBBLE_MIN_H + d[o + 3] * RUBBLE_FRAC * 0.5 + SINK;
       sx *= 1.12; sz *= 1.12;
       _col.setHex(RUBBLE_COLOR);
       _rc.setHex(RUBBLE_COLOR);
+      _fc.copy(_col); _fr.copy(_rc);
       flag = 1;
-      _q2.setFromAxisAngle(_ax.set(Math.cos(i * 2.1), 0, Math.sin(i * 2.1)), 0.09);
+      flagFar = 1;
+      syFar = sy;
+      _q2.setFromAxisAngle(_ax.set(Math.cos(i * 2.1), 0, Math.sin(i * 2.1)), 0.05);
       _q.multiply(_q2);
-    } else if (integ < BUILDING_DAMAGED_BELOW) {
+      qq.copy(_q);
+    } else if (s === 1) {
       const k = 1 - integ / BUILDING_DAMAGED_BELOW;
       sy = d[o + 3] * (1 - 0.3 * k) * hScale + SINK;
+      syFar = sy;
       const dk = 0.62 - 0.22 * k;
-      _col.multiplyScalar(dk);
-      _rc.multiplyScalar(dk);
-      _q2.setFromAxisAngle(_ax.set(Math.cos(i * 1.7), 0, Math.sin(i * 1.7)), 0.05 + 0.12 * k);
+      _fc.multiplyScalar(dk);
+      _fr.multiplyScalar(dk);
+      _q2.setFromAxisAngle(_ax.set(Math.cos(i * 1.7), 0, Math.sin(i * 1.7)), 0.02 + 0.05 * k);
       _q.multiply(_q2);
+      qq.copy(_q);
+      flag = 3 + style * 10;
+    } else if (integ < BUILDING_LIGHT_BELOW) {
+      flag = 2 + style * 10;
+      const dk = 0.9 - 0.12 * (1 - integ / BUILDING_LIGHT_BELOW);
+      _fc.multiplyScalar(dk);
+      _fr.multiplyScalar(dk);
     }
     _p.set(d[o], d[o + 6] * e - SINK, d[o + 1]);
+    const t = this.tiles[this.tileOf[i]];
+    // Zustandswechsel: alten Slot freigeben
+    const prev = this.state[i];
+    if (prev !== s) {
+      if (prev === 0) this.hide(t.meshes[typ]!, this.slotNear[i]);
+      else if (prev === 1) this.releaseVar(t.heavy[typ], this.slotVar[i]);
+      else if (prev === 2) this.releaseVar(t.rub[i % RUBBLE_VARIANTS], this.slotVar[i]);
+      this.slotVar[i] = -1;
+      if (s === 1) this.slotVar[i] = this.allocVar(this.varMesh(t, 1, typ));
+      else if (s === 2) this.slotVar[i] = this.allocVar(this.varMesh(t, 2, i % RUBBLE_VARIANTS));
+      this.state[i] = s;
+    }
     _s.set(sx, sy, sz);
     _m.compose(_p, _q, _s);
-    const t = this.tiles[this.tileOf[i]];
-    const mesh = t.meshes[this.typ[i]]!;
-    const s = this.slotNear[i];
-    _m.toArray(mesh.instanceMatrix.array as Float32Array, s * 16);
-    (mesh.instanceColor!.array as Float32Array).set([_col.r, _col.g, _col.b], s * 3);
-    ((mesh.geometry.getAttribute('aRoof') as THREE.InstancedBufferAttribute).array as Float32Array).set([_rc.r, _rc.g, _rc.b, flag], s * 4);
-    this.dirtyMeshes.add(mesh);
-    // Fern-LOD
+    if (s === 0) this.put(t.meshes[typ]!, this.slotNear[i], _col, _rc, flag);
+    else if (s === 1) this.put(t.heavy[typ]!, this.slotVar[i], _col, _rc, flag);
+    else this.put(t.rub[i % RUBBLE_VARIANTS]!, this.slotVar[i], _col, _rc, flag);
+    // Fern-LOD (einfacher Quader)
     const far = t.far!;
     const fs = this.slotFar[i];
-    _s.y = sy * (flag ? 1 : FAR_TOP[this.typ[i]]);
-    _m.compose(_p, _q, _s);
-    _m.toArray(far.instanceMatrix.array as Float32Array, fs * 16);
-    (far.instanceColor!.array as Float32Array).set([_col.r, _col.g, _col.b], fs * 3);
-    ((far.geometry.getAttribute('aRoof') as THREE.InstancedBufferAttribute).array as Float32Array).set([_rc.r, _rc.g, _rc.b, flag], fs * 4);
-    this.dirtyMeshes.add(far);
+    _s.set(sx, syFar * (flagFar ? 1 : FAR_TOP[typ]), sz);
+    _m.compose(_p, qq, _s);
+    this.put(far, fs, _fc, _fr, flagFar);
   }
 
   flush(): void {
@@ -721,6 +302,8 @@ export class BuildingLayer {
     for (const t of this.tiles) {
       const meshes: THREE.InstancedMesh[] = [];
       for (const m of t.meshes) if (m) meshes.push(m);
+      for (const m of t.heavy) if (m) meshes.push(m);
+      for (const m of t.rub) if (m) meshes.push(m);
       if (t.far) meshes.push(t.far);
       let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, y0 = Infinity, y1 = -Infinity, hw = 0;
       for (const i of t.farIds) {
@@ -731,6 +314,7 @@ export class BuildingLayer {
       }
       const c = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
       const r = Math.hypot((x1 - x0) / 2 + hw, (y1 - y0) / 2 + 0.1, (z1 - z0) / 2 + hw) * 1.1;
+      t.sphere = new THREE.Sphere(c.clone(), r);
       for (const m of meshes) m.boundingSphere = new THREE.Sphere(c.clone(), r);
     }
   }
@@ -748,6 +332,8 @@ export class BuildingLayer {
       if (lod === t.lod) continue;
       t.lod = lod;
       for (const m of t.meshes) if (m) m.visible = lod === 0;
+      for (const m of t.heavy) if (m) m.visible = lod === 0;
+      for (const m of t.rub) if (m) m.visible = lod === 0;
       if (t.far) t.far.visible = lod === 1;
     }
   }
@@ -803,18 +389,33 @@ void main() {
   float de = min(e.x, e.y);
   float blk = smoothstep(0.07, 0.07 + max(0.018, aa), de);
   float walk = smoothstep(0.1, 0.1 + max(0.018, aa), de);
-  vec3 asphalt = srgb(vec3(0.24, 0.24, 0.25));
-  vec3 side = srgb(vec3(0.5, 0.48, 0.44));
+  float g = hash21(floor(vUv * uN * 7.0));
+  float g2 = hash21(floor(vUv * uN * 41.0));
+  vec3 asphalt = srgb(vec3(0.23, 0.23, 0.24)) * (0.92 + 0.14 * g2);
+  vec3 side = srgb(vec3(0.64, 0.62, 0.58)) * (0.92 + 0.14 * g);
   vec3 inner = srgb(vec3(0.46, 0.43, 0.38));
   if (k > 1.5 && k < 2.5) inner = srgb(vec3(0.27, 0.42, 0.2));
   else if (k > 2.5 && k < 3.5) inner = srgb(vec3(0.5, 0.49, 0.45));
   else if (k > 3.5 && k < 4.5) inner = srgb(vec3(0.34, 0.46, 0.24));
   else if (k > 4.5 && k < 5.5) inner = srgb(vec3(0.38, 0.47, 0.27));
   else if (k > 5.5) inner = srgb(vec3(0.62, 0.59, 0.52));
-  float g = hash21(floor(vUv * uN * 7.0));
   inner *= 0.86 + 0.28 * g;
   vec3 col = mix(asphalt, side, 1.0 - blk);
+  // Bordstein (dunkle Kante) zwischen Fahrbahn und Gehweg
+  float kerb = smoothstep(0.062, 0.07, de) * (1.0 - smoothstep(0.07, 0.077, de));
+  col = mix(col, srgb(vec3(0.34, 0.33, 0.32)), kerb * (1.0 - smoothstep(0.02, 0.05, aa)));
   col = mix(col, inner, walk);
+  // Markierungen: Mittellinie, Zebrastreifen nahe der Kreuzung
+  bool alongX = e.y < e.x;
+  float s = alongX ? f.x : f.y;
+  float cd = alongX ? e.y : e.x;
+  float fadeM = 1.0 - smoothstep(0.012, 0.03, aa);
+  float dash = step(cd, 0.006) * step(0.5, fract(s * 4.0)) * step(0.14, s) * step(s, 0.86);
+  float zebraZone = (step(abs(s - 0.1), 0.02) + step(abs(s - 0.9), 0.02)) * step(cd, 0.065) * step(0.004, cd);
+  float zebra = zebraZone * step(0.5, fract(cd * 90.0));
+  float stop = (step(abs(s - 0.14), 0.004) + step(abs(s - 0.86), 0.004)) * step(cd, 0.065) * step(0.012, cd);
+  col = mix(col, srgb(vec3(0.82, 0.78, 0.55)), dash * fadeM * (1.0 - blk) * 0.0 + dash * fadeM * 0.9);
+  col = mix(col, srgb(vec3(0.85)), max(zebra, stop) * fadeM * 0.9);
   col = mix(col, mix(asphalt, inner, 0.8), smoothstep(0.3, 0.7, aa));
   col *= 1.0 - 0.55 * uNight;
   gl_FragColor = vec4(col, 1.0);
@@ -822,7 +423,7 @@ void main() {
 }
 `;
 
-interface CityGrid {
+interface CityGrid extends StreetGrid {
   cx: number; cz: number; theta: number; M: number; S: number;
   kinds: Uint8Array;
 }
@@ -897,13 +498,13 @@ const MED = new Set(['ESP', 'PRT', 'ITA', 'GRC', 'MLT', 'TUR', 'CYN', 'SMR', 'MA
 const NORDIC = new Set(['NOR', 'SWE', 'FIN', 'DNK', 'ISL']);
 
 export const WALL_WEST = [0xd6cdb4, 0xcbbf9f, 0xb9b09a, 0xc9a98a, 0xc4b79a, 0xa89f8c, 0xbfa891, 0xd2c6a4, 0x9a6a55, 0x8c5e4a, 0xb08468];
-export const WALL_MED = [0xe0cfa8, 0xd8b98a, 0xcfa77a, 0xe6dcc0, 0xc79a6c, 0xd9c7a3, 0xe9e2d0];
+export const WALL_MED = [0xe0cfa8, 0xd8b98a, 0xcfa77a, 0xe6dcc0, 0xc79a6c, 0xd9c7a3, 0xe9e2d0, 0xf0ebdc, 0xf4f0e4, 0xeee4cc, 0xe8d2a8, 0xf2e8d0];
 export const WALL_NORDIC = [0xa14a3a, 0xd9b25a, 0xe8e4d8, 0x7d95a3, 0xb8573f, 0xc9c0a0];
 export const WALL_PLATTE = [0xd0ccbf, 0xc4c2b6, 0xb8b7ae, 0xd8d0b8, 0xc4d2c0, 0xdccbb4, 0xbac4c8];
 export const WALL_MODERN = [0xc0ccd4, 0xb0bec8, 0xa4b6c0, 0xcdd6d8, 0xb4bec6];
 export const WALL_IND = [0xb0b2ae, 0x9aa4b0, 0xbfb29a, 0x93a39a, 0xc4c0b4];
 export const ROOF_WEST = [0xb8644a, 0xa65a42, 0xc06c50, 0x8a6048, 0x7a5a48, 0x6e727c, 0x5c6068, 0x7c7f86];
-export const ROOF_MED = [0xc8683f, 0xbc5e3a, 0xd47a50, 0xc9754f];
+export const ROOF_MED = [0xc8683f, 0xbc5e3a, 0xd47a50, 0xc9754f, 0xb85a38, 0xd88a5e];
 export const ROOF_NORDIC = [0x5a5758, 0x6a524a, 0x8a4a3c, 0x62666e];
 export const ROOF_FLAT = [0x8a8884, 0x7a7a7c, 0x9a978f, 0x808286];
 export const ROOF_IND = [0x80868a, 0x8c6c58, 0x959a9e, 0x6e757a];
@@ -950,6 +551,11 @@ export class Cities {
   private readonly mat: BuildingMaterial;
   private readonly lists: GenLists = { data: [], typ: [], roof: [] };
   private churches = 0;
+  private readonly street: StreetLife;
+  private readonly fires = new BuildingFires(60);
+  private readonly scorch: DecalSet;
+  private readonly scorchSlot = new Map<number, number>();
+  private lastT = 0;
 
   constructor(geo: GeoData, settings: Settings) {
     this.geo = geo;
@@ -985,6 +591,10 @@ export class Cities {
       this.floorGroup.add(f.mesh);
     }
 
+    // Straßenleben (Laternen, Bäume, Autos, Zäune, Dekale)
+    this.street = new StreetLife(geo, grids);
+    this.scorch = new DecalSet(geo, 768);
+
     // Marker
     const cities = geo.meta.cities;
     const c = new THREE.Color();
@@ -1012,7 +622,7 @@ export class Cities {
     const group = new THREE.Group();
     group.name = 'Cities';
     this.floorGroup.name = 'CityFloors';
-    group.add(this.floorGroup, this.layer.group, this.markers);
+    group.add(this.floorGroup, this.layer.group, this.street.object, this.scorch.mesh, this.fires.object, this.markers);
     this.object = group;
     this.applySettings(settings);
   }
@@ -1046,10 +656,15 @@ export class Cities {
     const popM = Math.max(0.02, pop / 1e6);
     const R = cityRadiusKm(pop, capital);
     const [lon, lat] = this.geo.worldToLonLat(cx, cz);
-    let style = 0; // 0 West, 1 Ost (Platte), 2 Mittelmeer, 3 Nordisch
-    if (EAST.has(country) || (country === 'DEU' && lon > 11.2 && lat > 50.4)) style = 1;
+    let style = 0; // 0 West (VAL: alpin/mitteleuropäisch), 1 Ost (KRN: Plattenbau), 2 Mittelmeer (MAR), 3 Nordisch
+    if (country === 'VAL') style = 0;
+    else if (country === 'KRN') style = 1;
+    else if (country === 'MAR') style = 2;
+    else if (EAST.has(country) || (country === 'DEU' && lon > 11.2 && lat > 50.4)) style = 1;
     else if (MED.has(country) || lat < 43.2) style = 2;
     else if (NORDIC.has(country) || lat > 58) style = 3;
+    let styleBits = 0;
+    const timberP = country === 'VAL' ? 0.32 : style === 0 ? 0.12 : 0;
     const wallOld = style === 2 ? WALL_MED : style === 3 ? WALL_NORDIC : WALL_WEST;
     const roofOld = style === 2 ? ROOF_MED : style === 3 ? ROOF_NORDIC : ROOF_WEST;
     const theta = rnd() * Math.PI;
@@ -1073,7 +688,8 @@ export class Cities {
     const emit = (a: number, b: number, w: number, h: number, d: number, rotLocal: number, type: number, wall: number, roof: number, jitter = 0): void => {
       const rj = jitter ? (rnd() - 0.5) * jitter : 0;
       a += ou; b += ov;
-      this.add(cx + a * ca + b * sa, cz - a * sa + b * ca, w, h, d, theta + rotLocal + rj, type, wall, roof);
+      const sb = type === BT.OLD || type === BT.VILLA ? styleBits : 0;
+      this.add(cx + a * ca + b * sa, cz - a * sa + b * ca, w, h, d, theta + rotLocal + rj, type, wall, ((roof | (sb << STYLE_SHIFT)) >>> 0));
     };
 
     interface Cell { i: number; j: number; f: number }
@@ -1107,6 +723,7 @@ export class Cities {
         if (da < 0.5) inInd = true;
       }
       const before = this.lists.typ.length;
+      styleBits = timberP > 0 && rnd() < timberP ? 1 : 0;
       let kind = 1;
       const Bh = 0.085;
       if (inInd) {
@@ -1185,7 +802,7 @@ export class Cities {
     }
     this.churches += churches;
     if (n === 0) return null;
-    return { cx, cz, theta, M, S, kinds };
+    return { name, cx, cz, theta, M, S, kinds, style };
   }
 
   private oldBlock(emit: (a: number, b: number, w: number, h: number, d: number, rotLocal: number, type: number, wall: number, roof: number, jitter?: number) => void, rnd: () => number, Bh: number, hBase: number, type: number, walls: number[], roofs: number[], tall: boolean): void {
@@ -1244,6 +861,8 @@ export class Cities {
     this.layer.setExag(this.exag);
     const e = this.exag;
     for (const f of this.floors) f.setExag(e);
+    this.street.setExag(e);
+    this.fires.setExag(e);
     const cities = this.geo.meta.cities;
     for (let i = 0; i < cities.length; i++) {
       this.cityPos[i * 3 + 1] = Math.max(0, this.geo.heightAt(cities[i].pos[0], cities[i].pos[1])) * e + 1.5;
@@ -1261,13 +880,52 @@ export class Cities {
     const near = h < HIDE_DISTANCE;
     this.layer.setVisible(near);
     this.floorGroup.visible = near;
+    this.street.object.visible = near;
+    this.scorch.mesh.visible = near;
     this.markers.visible = !near && h < MARKER_MAX_DISTANCE;
+    const nowS = performance.now() / 1000;
+    const dt = this.lastT > 0 ? Math.min(0.1, nowS - this.lastT) : 0;
+    this.lastT = nowS;
+    this.mat.uniforms.uTime.value = nowS % 4096;
     if (near) {
+      this.street.update(camera);
+      setDecalParams(this.exag, h);
+      setPropParams(this.exag, h);
+      this.fires.update(dt, camera, nowS % 4096);
       this.layer.update(camera.position, true);
       // strategische Gebäudeskalierung (Silhouetten bleiben aus der Ferne lesbar) + größere Fenster
       this.mat.uniforms.uVis.value = THREE.MathUtils.clamp(1 + (h - 40) / 220, 1, 2.2);
       this.mat.uniforms.uWinScale.value = THREE.MathUtils.clamp(h / 7, 1, 3.2);
       this.lift.value = THREE.MathUtils.clamp(0.012 + h * 0.0035, 0.012, 8);
+    } else {
+      this.fires.object.visible = false;
+    }
+  }
+
+  /** Brandstatistik / Streetlife-Statistik (Tests) */
+  stats(): { burning: number; street: { lamps: number; trees: number; cars: number; other: number; decals: number; total: number } } {
+    return { burning: this.fires.count, street: this.street.stats };
+  }
+
+  /** Brand und Brandfleck zu Gebäude id aktualisieren (nach Integritätsänderung) */
+  private updateHazards(id: number, burnFresh: boolean): void {
+    const g = this.integrity[id];
+    const o = id * STRIDE, d = this.data;
+    if (g < BUILDING_DAMAGED_BELOW) {
+      const r = Math.max(d[o + 2], d[o + 4]) * 0.5;
+      if (burnFresh || this.fires.isBurning(id)) {
+        const dur = 60 + 60 * Math.abs(Math.sin(id * 78.233) * 43758.5453 % 1);
+        if (burnFresh) this.fires.ignite(id, d[o], d[o + 1], d[o + 6], this.effectiveHeight(id) * (g <= 0 ? 1.4 : 1), r, dur);
+      }
+    } else this.fires.extinguish(id);
+    if (g <= 0) {
+      if (!this.scorchSlot.has(id)) {
+        const sz = Math.max(0.045, Math.max(d[o + 2], d[o + 4]) * 1.9);
+        this.scorchSlot.set(id, this.scorch.add(DECAL.SCORCH, d[o], d[o + 1], sz, sz * 0.9, d[o + 5], (id % 97) / 97));
+      }
+    } else {
+      const sl = this.scorchSlot.get(id);
+      if (sl !== undefined) { this.scorch.remove(sl); this.scorchSlot.delete(id); }
     }
   }
 
@@ -1501,6 +1159,7 @@ export class Cities {
     info.integrity = after;
     info.h = this.data[id * STRIDE + 3];
     this.dirty.add(id);
+    this.updateHazards(id, after < BUILDING_DAMAGED_BELOW);
     bus.emit('building:damaged', { id, integrity: after });
     if (after <= 0) {
       this.garrison[id] = 0;
@@ -1517,6 +1176,7 @@ export class Cities {
     this.integrity[id] = Math.max(0, Math.min(1, v));
     this.info(id).integrity = this.integrity[id];
     this.dirty.add(id);
+    this.updateHazards(id, this.integrity[id] < BUILDING_DAMAGED_BELOW);
   }
 
   /** Besatzung (Anzahl Soldaten) setzen, auf Kapazität begrenzt. */

@@ -268,12 +268,12 @@ export function buildSoldier(kind: SoldierKind): ModelDef {
         pack(b);
         // Ghillie-Umhang: struppige Streifen
         b.extrudeX([[0.16, 1.72], [0.31, 1.58], [0.44, 0.78], [0.2, 0.62], [0.1, 1.25]], 0.52, 0, 0, 0, 0xd0d8c0, { taper: [1, 0.85], ao: 0.2 });
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 6; i++) {
           const a = i * 2.1;
           b.box(0.12, 0.22 + (i % 3) * 0.07, 0.08, Math.sin(a) * 0.26, 1.55 - (i % 5) * 0.14, 0.17 + Math.cos(a) * 0.08, i % 2 ? HULL_LIGHT : HULL_DARK, { rot: [0.2 * (i % 3), a, 0.3 * Math.sin(a)], ao: 0.1 });
         }
         b.lathe([[0, 0], [0.25, 0], [0.27, 0.03], [0.12, 0.1], [0, 0.13]], 'y', 0, 1.74, 0.0, HULL_DARK, { seg: 8, ao: 0.1 }); // Buschhut
-        for (let i = 0; i < 6; i++) b.box(0.03, 0.14, 0.03, Math.sin(i * 1.1) * 0.22, 1.74, Math.cos(i * 1.1) * 0.22, HULL_LIGHT, { rot: [0.2, i, 0.5], ao: 0 });
+        for (let i = 0; i < 3; i++) b.box(0.03, 0.14, 0.03, Math.sin(i * 1.1) * 0.22, 1.74, Math.cos(i * 1.1) * 0.22, HULL_LIGHT, { rot: [0.2, i, 0.5], ao: 0 });
       });
       break;
     }

@@ -179,7 +179,11 @@ float hs(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec3 sr(vec3 c) { return pow(c, vec3(2.2)); }
 float pw2(float x) { return exp2(ceil(log2(max(1.0, x)))); }
 float pxL;
-float band(float x, float c, float w) { return step(abs(x - c), max(w, pxL * 0.55)); }
+// Linie mit Flächendeckung (Teilpixel-Linien werden blasser statt zu Streifen aufzublähen)
+float band(float x, float c, float w) {
+  float cov = clamp(0.5 + (w - abs(x - c)) / pxL, 0.0, 1.0);
+  return cov * clamp(2.0 * w / pxL + 0.18, 0.0, 1.0);
+}
 
 void main() {
   #include <logdepthbuf_fragment>

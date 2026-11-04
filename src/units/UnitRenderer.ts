@@ -548,7 +548,7 @@ const ANIM_VERT_BODY = /* glsl */ `
     } else if (part < 13.5) {
       glow = smoothstep(0.35, 0.9, a.y);
       float fl = glow * (0.85 + 0.15 * sin(uTime * 45.0 + hs * 10.0));
-      p = pv + (p - pv) * vec3(1.0, 1.0, fl);
+      p = pv + (p - pv) * vec3(step(0.03, fl), step(0.03, fl), fl);
     } else if (part < 14.5) {
       glow = step(0.78, fract(uTime * 0.85 + hs));
     } else if (part < 15.5) {

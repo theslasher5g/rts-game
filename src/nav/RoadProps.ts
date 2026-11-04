@@ -800,7 +800,7 @@ export class RoadProps {
       ig.setAttribute('position', base.attributes.position);
       ig.setAttribute('color', base.attributes.color);
       const buf = new Float32Array(arr);
-      const ib = new THREE.InterleavedBuffer(buf, FLOATS);
+      const ib = new THREE.InstancedInterleavedBuffer(buf, FLOATS, 1);
       ig.setAttribute('aI0', new THREE.InterleavedBufferAttribute(ib, 4, 0));
       ig.setAttribute('aI1', new THREE.InterleavedBufferAttribute(ib, 4, 4));
       ig.instanceCount = n;
