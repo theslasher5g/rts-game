@@ -191,4 +191,10 @@ export interface GameEvents {
   'convoy:started': { convoyId: number; owner: string; kind: 'oil' | 'supply' };
   'convoy:lost': { convoyId: number; owner: string; cargo: number; by: string };
   'supply:low': { unitId: number; what: 'fuel' | 'ammo' };
+  // Phase 6 – Missionen, Tutorial, Nebel des Krieges
+  'mission:started': { id: string; name: string };
+  'mission:objective': { missionId: string; objectiveId: string; state: 'active' | 'done' | 'failed'; text: string };
+  'mission:ended': { missionId: string; result: 'victory' | 'defeat'; reason: string };
+  'tutorial:step': { index: number; total: number; text: string };
+  'fog:revealed': { a3: string; cells: number };
 }
