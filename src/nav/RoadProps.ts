@@ -14,11 +14,14 @@ import * as THREE from 'three';
 import type { GeoData } from '../world/GeoData';
 import { terrainHeightKm } from '../world/Cities';
 import {
-  HALF_WIDTH_M, SCALE_GLSL, TILE_KM, getRoadUniforms, ihash, stationAtOrAfter, stationAtOrBefore,
+  HALF_WIDTH_M, SCALE_GLSL, SCALE_K, SCALE_MAX, TILE_KM, getRoadUniforms, ihash, stationAtOrAfter, stationAtOrBefore,
   type Crossing, type RestStop, type RoadNet,
 } from './RoadGeometry';
 
 // ======================================================================= Geometrie-Baukasten (Meter)
+
+/** Mindestmaß (m) jedes Bauteils – dünne Teile würden bei Strategie-Maßstab unter einem Pixel verschwinden */
+const MIN_DIM = 0.17;
 
 class GB {
   p: number[] = [];
@@ -40,6 +43,7 @@ class GB {
 
   /** Quader (Mittelpunkt, Ausmaße), optional gedreht (rz in der XY-Ebene, dann ry) und mit Oberseitenfarbe */
   box(cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, hex: number, ry = 0, rz = 0, hexTop?: number): this {
+    sx = Math.max(sx, MIN_DIM); sy = Math.max(sy, MIN_DIM); sz = Math.max(sz, MIN_DIM);
     const cb = this.rgb(hex), ct = hexTop === undefined ? cb : this.rgb(hexTop);
     const crz = Math.cos(rz), srz = Math.sin(rz), cry = Math.cos(ry), sry = Math.sin(ry);
     const ids: number[] = [];
@@ -59,6 +63,7 @@ class GB {
 
   /** Kegelstumpf/Zylinder (Fuß bei cy) */
   cyl(cx: number, cy: number, cz: number, rb: number, rt: number, h: number, segs: number, hexB: number, hexT = hexB): this {
+    rb = Math.max(rb, MIN_DIM * 0.7); rt = Math.max(rt, MIN_DIM * 0.6);
     const cb = this.rgb(hexB), ct = this.rgb(hexT);
     const lo: number[] = [], hi: number[] = [];
     for (let k = 0; k < segs; k++) {
@@ -138,7 +143,7 @@ const MAX_D: Record<PropKind, number> = {
 /** Zusatz-Vergrößerung kleiner Teile (bleiben sonst unter einem Pixel) */
 const BOOST: Record<PropKind, number> = {
   lamp: 1.25, lampDouble: 1.25, guardrail: 1.4, pole: 1.25, signSpeed: 1.8, signWarn: 1.8, signDir: 1.5, gantry: 1.0, kmPost: 2.2, reflector: 2.4,
-  busStop: 1.4, billboard: 1.0, truck: 1.2, van: 1.2, car: 1.2, crossBarrier: 1.4, crossX: 1.6, mast: 1.2, shrine: 1.8, culvert: 1.2, jersey: 1.3, signal: 1.6,
+  busStop: 1.4, billboard: 1.0, truck: 0.75, van: 0.75, car: 0.75, crossBarrier: 1.0, crossX: 1.6, mast: 1.2, shrine: 1.8, culvert: 1.2, jersey: 1.0, signal: 1.6,
 };
 
 function signGlyphs(g: GB, cx: number, cy: number, z: number, w: number, h: number, seed: number, hex = 0xf2f2ee): void {
@@ -353,14 +358,18 @@ ${SCALE_GLSL}
 attribute vec4 aI0;
 attribute vec4 aI1;
 uniform float uMaxD;
+uniform float uKP;
+uniform float uPMax;
 const vec3 TINTS[8] = vec3[8](${TINTS.map((c) => `vec3(${c.map((v) => Math.pow(v, 2.2).toFixed(4)).join(',')})`).join(',')});
 `;
 
-function makePropMaterial(maxD: number, shared: Record<string, THREE.IUniform>): THREE.MeshLambertMaterial {
+function makePropMaterial(maxD: number, shared: Record<string, THREE.IUniform>, roadScaled: boolean): THREE.MeshLambertMaterial {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, shared);
     sh.uniforms.uMaxD = { value: maxD };
+    sh.uniforms.uKP = { value: roadScaled ? SCALE_K : PROP_K };
+    sh.uniforms.uPMax = { value: roadScaled ? SCALE_MAX : PROP_MAX };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + PROP_PARS)
       .replace(
@@ -374,7 +383,7 @@ function makePropMaterial(maxD: number, shared: Record<string, THREE.IUniform>):
         float pcy = cos(pyaw), psy = sin(pyaw);
         vec3 pip = vec3(aI0.x, aI1.w * uExag, aI0.y);
         float pd = max(1.0, distance(cameraPosition, pip));
-        float pS = roadScale(pd) * aI0.w * step(pd, uMaxD);
+        float pS = clamp(pd * uKP, 1.0, uPMax) * aI0.w * step(pd, uMaxD);
         vec2 pbase = aI0.xy + aI1.xy * roadScale(pd);
         float pg = groundKm(pbase) * uExag;
         vec3 ploc = transformed * pS;
@@ -394,19 +403,23 @@ const WIRE_VERT = /* glsl */ `
 #include <fog_pars_vertex>
 ${SCALE_GLSL}
 attribute vec4 aAB;   // A.xz, B.xz
-attribute vec4 aP;    // t, offX, offZ, Höhe km
+attribute vec4 aP;    // t, offX, offZ (Straßenmaßstab), Höhe km
+attribute vec2 aQ;    // Zusatzversatz (Querträger) im Prop-Maßstab
 attribute float aSag; // Durchhang km
 uniform float uMaxD;
+uniform float uKP;
+uniform float uPMax;
 void main() {
   vec2 A = aAB.xy, B = aAB.zw;
   float gA0 = groundKm(A) * uExag;
   float d = max(1.0, distance(cameraPosition, vec3(A.x, gA0, A.y)));
   float S = roadScale(d);
+  float SP = clamp(d * uKP, 1.0, uPMax) * 1.25;
   vec2 pa = A + aP.yz * S, pb = B + aP.yz * S;
   float ya = groundKm(pa) * uExag, yb = groundKm(pb) * uExag;
   float t = aP.x;
-  vec2 xz = mix(pa, pb, t);
-  float y = mix(ya, yb, t) + (aP.w - aSag * 4.0 * t * (1.0 - t)) * S * 1.25;
+  vec2 xz = mix(pa, pb, t) + aQ * SP;
+  float y = mix(ya, yb, t) + (aP.w - aSag * 4.0 * t * (1.0 - t)) * SP;
   vec4 mvPosition = viewMatrix * vec4(xz.x, y, xz.y, 1.0);
   if (d > uMaxD) mvPosition = vec4(0.0, 0.0, 1.0, 1.0);
   gl_Position = projectionMatrix * mvPosition;
@@ -433,6 +446,9 @@ export interface PropTile {
   instances: number;
 }
 
+/** Prop-Maßstab: Faktor je km Kameraabstand (größer als beim Straßenband, Props sind sonst Haarlinien) */
+const PROP_K = 1.7;
+const PROP_MAX = 26;
 const FLOATS = 8;
 const TILE_INSTANCE_CAP = 9000;
 
@@ -452,13 +468,12 @@ export class RoadProps {
   /** Gesamtzahl lebender Instanzen */
   total = 0;
 
-  constructor(geo: GeoData, net: RoadNet, fogUniforms: Record<string, THREE.IUniform>) {
+  constructor(geo: GeoData, net: RoadNet) {
     this.geo = geo;
     this.net = net;
     this.uniforms = getRoadUniforms(geo);
     this.nodeBridge = new Uint8Array(net.graph.nodes.length);
     for (const e of net.graph.edges) if (e.bridge) { this.nodeBridge[e.a] = 1; this.nodeBridge[e.b] = 1; }
-    void fogUniforms;
   }
 
   private geom(kind: PropKind): THREE.BufferGeometry {
@@ -469,7 +484,7 @@ export class RoadProps {
 
   private mat(kind: PropKind): THREE.MeshLambertMaterial {
     let m = this.mats.get(kind);
-    if (!m) this.mats.set(kind, (m = makePropMaterial(MAX_D[kind], this.uniforms)));
+    if (!m) this.mats.set(kind, (m = makePropMaterial(MAX_D[kind], this.uniforms, kind === 'gantry' || kind === 'crossBarrier' || kind === 'jersey')));
     return m;
   }
 
@@ -478,7 +493,7 @@ export class RoadProps {
       vertexShader: WIRE_VERT,
       fragmentShader: WIRE_FRAG,
       fog: true,
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uColor: { value: new THREE.Color(color) }, uMaxD: { value: maxD } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uColor: { value: new THREE.Color(color) }, uMaxD: { value: maxD }, uKP: { value: PROP_K }, uPMax: { value: PROP_MAX } }]),
     });
     Object.assign(m.uniforms, this.uniforms);
     this.wireMats.push(m);
@@ -512,11 +527,11 @@ export class RoadProps {
     const tmp = new Float64Array(4);
     const tmp2 = new Float64Array(4);
 
-    const wireSpan = (arr: number[], ax: number, az: number, bx: number, bz: number, offx: number, offz: number, hgtM: number, sagM: number, segs: number) => {
+    const wireSpan = (arr: number[], ax: number, az: number, bx: number, bz: number, offx: number, offz: number, qx: number, qz: number, hgtM: number, sagM: number, segs: number) => {
       for (let k = 0; k < segs; k++) {
         const t0 = k / segs, t1 = (k + 1) / segs;
-        arr.push(ax, az, bx, bz, t0, offx, offz, hgtM * 0.001, sagM * 0.001);
-        arr.push(ax, az, bx, bz, t1, offx, offz, hgtM * 0.001, sagM * 0.001);
+        arr.push(ax, az, bx, bz, t0, offx, offz, hgtM * 0.001, qx, qz, sagM * 0.001);
+        arr.push(ax, az, bx, bz, t1, offx, offz, hgtM * 0.001, qx, qz, sagM * 0.001);
       }
     };
 
@@ -605,7 +620,7 @@ export class RoadProps {
               if (here) addSide('pole', tmp[0], tmp[1], tmp[2], tmp[3], side, lat, 0, 0, 1, Math.PI * 0.5 * 0);
               if (prev && (here || inTile(prev.x, prev.z))) {
                 for (const w of [-0.95, 0.95]) {
-                  wireSpan(wirePole, prev.x, prev.z, tmp[0], tmp[1], prev.ox + nx * w * 0.001, prev.oz + nz * w * 0.001, 8.1, 0.8, 5);
+                  wireSpan(wirePole, prev.x, prev.z, tmp[0], tmp[1], prev.ox, prev.oz, nx * w * 0.001, nz * w * 0.001, 8.1, 0.8, 5);
                 }
               }
               prev = { x: tmp[0], z: tmp[1], ox, oz };
@@ -724,7 +739,7 @@ export class RoadProps {
               const here = inTile(tmp[0], tmp[1]);
               const side = k % 2 ? 1 : -1;
               if (here) addSide('mast', tmp[0], tmp[1], tmp[2], tmp[3], side, 3.4);
-              if (prev && (here || inTile(prev.x, prev.z))) wireSpan(wireCat, prev.x, prev.z, tmp[0], tmp[1], 0, 0, 5.5, 0.18, 3);
+              if (prev && (here || inTile(prev.x, prev.z))) wireSpan(wireCat, prev.x, prev.z, tmp[0], tmp[1], 0, 0, 0, 0, 5.5, 0.18, 3);
               prev = { x: tmp[0], z: tmp[1] };
             }
           }
@@ -814,17 +829,19 @@ export class RoadProps {
     if (!this.wm) this.wm = { pole: this.wireMat(0x1c1c1e, 9), cat: this.wireMat(0x2b2d30, 10) };
     for (const [arr, mat] of [[wirePole, this.wm.pole], [wireCat, this.wm.cat]] as Array<[number[], THREE.ShaderMaterial]>) {
       if (arr.length === 0) continue;
-      const n = arr.length / 9;
-      const ab = new Float32Array(n * 4), pp = new Float32Array(n * 4), sg = new Float32Array(n);
+      const n = arr.length / 11;
+      const ab = new Float32Array(n * 4), pp = new Float32Array(n * 4), qq = new Float32Array(n * 2), sg = new Float32Array(n);
       for (let k = 0; k < n; k++) {
-        ab.set(arr.slice(k * 9, k * 9 + 4), k * 4);
-        pp.set(arr.slice(k * 9 + 4, k * 9 + 8), k * 4);
-        sg[k] = arr[k * 9 + 8];
+        ab.set(arr.slice(k * 11, k * 11 + 4), k * 4);
+        pp.set(arr.slice(k * 11 + 4, k * 11 + 8), k * 4);
+        qq.set(arr.slice(k * 11 + 8, k * 11 + 10), k * 2);
+        sg[k] = arr[k * 11 + 10];
       }
       const lg = new THREE.BufferGeometry();
       lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
       lg.setAttribute('aAB', new THREE.BufferAttribute(ab, 4));
       lg.setAttribute('aP', new THREE.BufferAttribute(pp, 4));
+      lg.setAttribute('aQ', new THREE.BufferAttribute(qq, 2));
       lg.setAttribute('aSag', new THREE.BufferAttribute(sg, 1));
       lg.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, 0, cz), 1e5);
       const ls = new THREE.LineSegments(lg, mat);

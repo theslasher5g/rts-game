@@ -6,8 +6,8 @@ import { terrainHeightKm } from '../world/Cities';
 import type { NavGraph } from './NavGraph';
 import { ROAD_CLASSES } from './types';
 import {
-  HALF_WIDTH_M, RibbonBuilder, RoadNet, SCALE_GLSL, T_BALLAST, T_CROSSING, T_LAYBY, T_PATCH, T_RAMP, T_STEEL, TILE_KM, TYPE_OF_CLASS,
-  getRoadUniforms, stationAtOrAfter, stationAtOrBefore, type Crossing, type RestStop,
+  HALF_WIDTH_M, RibbonBuilder, type RoadNet, SCALE_GLSL, T_BALLAST, T_CROSSING, T_LAYBY, T_PATCH, T_RAMP, T_STEEL, TILE_KM, TYPE_OF_CLASS,
+  getRoadNet, getRoadUniforms, stationAtOrAfter, stationAtOrBefore, type Crossing, type RestStop,
 } from './RoadGeometry';
 import { RoadProps, type PropTile } from './RoadProps';
 
@@ -27,7 +27,7 @@ import { RoadProps, type PropTile } from './RoadProps';
  * (RoadProps, ≤ ~15 km). Die Linien-Darstellung bleibt als billige Fernansicht und als Rückfall erhalten.
  */
 
-const DENSIFY_KM = 2.5;
+const DENSIFY_KM = 0.0625;
 
 interface ClassStyle {
   color: number;
@@ -41,14 +41,14 @@ interface ClassStyle {
 }
 
 const STYLES: Record<string, ClassStyle> = {
-  motorway: { color: 0xe6b84a, px: 2.0, minKm: 0.07, maxY: 1e9, lift: 0.002 },
-  primary: { color: 0xd8d2b4, px: 1.6, minKm: 0.05, maxY: 2600, lift: 0.0 },
-  secondary: { color: 0xc4bfa6, px: 1.3, minKm: 0.04, maxY: 1100, lift: 0.0 },
-  road: { color: 0xa9a58f, px: 1.1, minKm: 0.03, maxY: 420, lift: 0.0 },
-  track: { color: 0x8a7f66, px: 1.0, minKm: 0.022, maxY: 180, lift: 0.0, dash: 0.6 },
-  rail: { color: 0x2c2a2a, px: 1.3, minKm: 0.03, maxY: 1400, lift: 0.002, dash: 0.5 },
+  motorway: { color: 0xe6b84a, px: 2.0, minKm: 0.03, maxY: 1e9, lift: 0.002 },
+  primary: { color: 0xd8d2b4, px: 1.6, minKm: 0.02, maxY: 2600, lift: 0.0 },
+  secondary: { color: 0xc4bfa6, px: 1.3, minKm: 0.015, maxY: 1100, lift: 0.0 },
+  road: { color: 0xa9a58f, px: 1.1, minKm: 0.012, maxY: 420, lift: 0.0 },
+  track: { color: 0x8a7f66, px: 1.0, minKm: 0.01, maxY: 180, lift: 0.0, dash: 0.6 },
+  rail: { color: 0x2c2a2a, px: 1.3, minKm: 0.012, maxY: 1400, lift: 0.002, dash: 0.5 },
   ferry: { color: 0x9fd0e8, px: 1.4, minKm: 0.12, maxY: 1500, lift: 0.0, dash: 5 },
-  bridge: { color: 0xf0e2b0, px: 2.2, minKm: 0.07, maxY: 1100, lift: 0.004 },
+  bridge: { color: 0xf0e2b0, px: 2.2, minKm: 0.03, maxY: 1100, lift: 0.004 },
 };
 
 const VERT = /* glsl */ `
@@ -65,6 +65,7 @@ uniform float uDistLift;
 varying float vDist;
 varying float vClosed;
 varying float vSide;
+varying vec2 vXZ;
 void main() {
   vec3 p = position;                       // x, Höhe(km), z
   vec4 mv0 = viewMatrix * vec4(p.x, p.y * uExag, p.z, 1.0);
@@ -77,6 +78,7 @@ void main() {
   vDist = aInfo.x;
   vClosed = aInfo.y;
   vSide = aSide.z;
+  vXZ = wp.xz;
   #include <logdepthbuf_vertex>
   #include <fog_vertex>
 }
@@ -93,8 +95,16 @@ uniform float uNear;     // 1 = nah (Muster sichtbar), 0 = fern (Muster ausgeble
 varying float vDist;
 varying float vClosed;
 varying float vSide;
+varying vec2 vXZ;
+uniform sampler2D uMask;
+uniform vec3 uMaskInfo;  // Kacheln x, z, Kachelgröße km (0 = aus)
+uniform float uUseMask;
 void main() {
   #include <logdepthbuf_fragment>
+  if (uUseMask > 0.5 && uMaskInfo.z > 0.0) {
+    vec2 tc = (floor(vXZ / uMaskInfo.z) + 0.5) / uMaskInfo.xy;
+    if (texture2D(uMask, tc).r > 0.5) discard;
+  }
   vec3 col = uColor;
   if (vClosed > 0.5) {
     if (fract(vDist / 0.8) > 0.55) discard;
@@ -330,6 +340,7 @@ interface Part {
   /** edgeId -> [Startvertex, Anzahl] */
   ranges: Map<number, [number, number]>;
   maxY: number;
+  minY: number;
 }
 
 interface Tile {
@@ -378,6 +389,11 @@ export class RoadRenderer {
   private readonly camPos = new THREE.Vector3();
   private readonly camDir = new THREE.Vector3();
   private readonly tmp4 = new Float64Array(4);
+  private readonly mask: Uint8Array;
+  private readonly maskTex: THREE.DataTexture;
+  private readonly maskInfo = new THREE.Vector3(1, 1, 0);
+  private readonly maskW: number;
+  private readonly maskH: number;
 
   constructor(geo: GeoData, graph: NavGraph, settings: Settings) {
     this.geo = geo;
@@ -387,6 +403,12 @@ export class RoadRenderer {
     this.object.name = 'Roads';
     this.object.visible = this.show;
 
+    this.maskW = Math.ceil(geo.widthKm / TILE_KM) + 2;
+    this.maskH = Math.ceil(geo.heightKm / TILE_KM) + 2;
+    this.mask = new Uint8Array(this.maskW * this.maskH);
+    this.maskTex = new THREE.DataTexture(this.mask, this.maskW, this.maskH, THREE.RedFormat, THREE.UnsignedByteType);
+    this.maskTex.minFilter = this.maskTex.magFilter = THREE.NearestFilter;
+    this.maskTex.needsUpdate = true;
     const order = ['motorway', 'primary', 'secondary', 'road', 'track', 'rail', 'ferry', 'bridge'];
     for (const cls of order) {
       const st = STYLES[cls];
@@ -406,11 +428,14 @@ export class RoadRenderer {
             uDash: { value: st.dash ?? 0 },
             uDashMode: { value: cls === 'rail' ? 1 : 0 },
             uNear: { value: 1 },
+            uMask: { value: this.maskTex },
+            uMaskInfo: { value: this.maskInfo },
+            uUseMask: { value: cls === 'ferry' || cls === 'bridge' ? 0 : 1 },
           },
         ]),
         side: THREE.DoubleSide,
       });
-      this.parts.push({ cls, mat, mesh: null, edges: [], closedAttr: null, ranges: new Map(), maxY: st.maxY });
+      this.parts.push({ cls, mat, mesh: null, edges: [], closedAttr: null, ranges: new Map(), maxY: st.maxY, minY: cls === 'bridge' ? 45 : 0 });
     }
     this.partOfEdge = new Int8Array(graph.edges.length);
     const idx = (c: string) => order.indexOf(c);
@@ -427,7 +452,7 @@ export class RoadRenderer {
     void ROAD_CLASSES;
 
     // Nahbereich: Bänder + Props
-    this.net = new RoadNet(geo, graph);
+    this.net = getRoadNet(geo, graph);
     this.shared = getRoadUniforms(geo);
     this.shared.uExag.value = this.exag;
     this.ribMat = new THREE.ShaderMaterial({
@@ -437,11 +462,11 @@ export class RoadRenderer {
       side: THREE.DoubleSide,
       uniforms: THREE.UniformsUtils.merge([
         THREE.UniformsLib.fog,
-        { uLight: { value: new THREE.Vector3(0.98, 0.95, 0.9) }, uLift0: { value: 0.004 }, uLift1: { value: 0.0016 } },
+        { uLight: { value: new THREE.Vector3(0.98, 0.95, 0.9) }, uLift0: { value: 0.002 + 0.0006 * this.exag }, uLift1: { value: 0.0016 } },
       ]),
     });
     Object.assign(this.ribMat.uniforms, this.shared);
-    this.props = new RoadProps(geo, this.net, this.shared);
+    this.props = new RoadProps(geo, this.net);
     this.detail.name = 'RoadDetail';
     this.object.add(this.detail);
   }
@@ -457,6 +482,7 @@ export class RoadRenderer {
     this.object.visible = this.show;
     for (const p of this.parts) p.mat.uniforms.uExag.value = this.exag;
     this.shared.uExag.value = this.exag;
+    this.ribMat.uniforms.uLift0.value = 0.002 + 0.0006 * this.exag;
   }
 
   setEdgeState(edgeId: number, open: boolean): void {
@@ -488,7 +514,7 @@ export class RoadRenderer {
     if (!this.show) return;
     const y = camera.position.y;
     for (const p of this.parts) {
-      const vis = y <= p.maxY;
+      const vis = y <= p.maxY && y >= p.minY;
       if (vis && !p.mesh) this.build(p);
       if (p.mesh) p.mesh.visible = vis;
       p.mat.uniforms.uNear.value = y < 120 ? 1 : y < 260 ? 1 - (y - 120) / 140 : 0;
@@ -520,7 +546,7 @@ export class RoadRenderer {
     const dist = Math.max(1, Math.hypot(cp.x - fx, cp.y - fy, cp.z - fz));
     const vis = dist < DETAIL_MAX;
     this.detail.visible = vis;
-    if (!vis) return;
+    if (!vis) { this.setMask(false, fx, fz, 0); return; }
     const R = Math.min(34, Math.max(7, dist * 1.35));
     const propR = dist < PROP_MAX_DIST ? Math.min(15, Math.max(5, dist * 1.3 + 2)) : 0;
     const t0x = Math.floor((fx - R) / TILE_KM), t1x = Math.floor((fx + R) / TILE_KM);
@@ -565,7 +591,21 @@ export class RoadRenderer {
         }
       }
     }
+    this.setMask(true, fx, fz, R);
     this.evict();
+  }
+
+  /** Maske der fertigen Kachelbänder: dort werden die Fern-Linien ausgeblendet */
+  private setMask(on: boolean, fx: number, fz: number, R: number): void {
+    let dirty = false;
+    this.maskInfo.set(this.maskW, this.maskH, on ? TILE_KM : 0);
+    for (const t of this.tiles.values()) {
+      if (t.tx < 0 || t.tz < 0 || t.tx >= this.maskW || t.tz >= this.maskH) continue;
+      const want = on && t.built && t.last === this.frame && Math.hypot((t.tx + 0.5) * TILE_KM - fx, (t.tz + 0.5) * TILE_KM - fz) <= R + TILE_KM * 0.72 ? 255 : 0;
+      const i = t.tz * this.maskW + t.tx;
+      if (this.mask[i] !== want) { this.mask[i] = want; dirty = true; }
+    }
+    if (dirty) this.maskTex.needsUpdate = true;
   }
 
   private evict(): void {
@@ -577,6 +617,8 @@ export class RoadRenderer {
         if (t.props) { this.props.disposeTile(t.props); t.props = null; t.propsBuilt = false; }
         if (this.tiles.size > MAX_TILES) {
           if (t.ribbon) { this.detail.remove(t.ribbon); t.ribbon.geometry.dispose(); t.ribbon = null; }
+          if (t.tx >= 0 && t.tz >= 0 && t.tx < this.maskW && t.tz < this.maskH) this.mask[t.tz * this.maskW + t.tx] = 0;
+          this.maskTex.needsUpdate = true;
           this.tiles.delete(t.key);
         }
       }
@@ -765,7 +807,7 @@ export class RoadRenderer {
         let dx = bx - ax, dz = bz - az;
         const L = Math.hypot(dx, dz) || 1;
         dx /= L; dz /= L;
-        const h = naval ? 0 : Math.max(0, geo.heightAt(x, z));
+        const h = naval ? 0 : Math.max(0, terrainHeightKm(geo, x, z));
         const cl = this.closed.has(eid) ? 1 : 0;
         for (let s = 0; s < 2; s++) {
           pos[v * 3] = x; pos[v * 3 + 1] = h; pos[v * 3 + 2] = z;

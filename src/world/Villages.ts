@@ -3,7 +3,9 @@ import type { GeoData } from './GeoData';
 import type { Settings } from '../core/types';
 import type { NavGraph } from '../nav/NavGraph';
 import type { BuildingInfo } from '../combat/types';
-import { BT, BuildingLayer, STRIDE, WALL_MED, WALL_NORDIC, WALL_WEST, ROOF_MED, ROOF_NORDIC, ROOF_WEST, cityRadiusKm, pick, terrainHeightKm, type Cities } from './Cities';
+import { BT, BuildingLayer, STRIDE, WALL_MED, WALL_NORDIC, WALL_WEST, ROOF_MED, ROOF_NORDIC, ROOF_WEST, BUILDING_DAMAGED_BELOW, cityRadiusKm, pick, terrainHeightKm, type Cities } from './Cities';
+import { STYLE_SHIFT, getBuildingMaterial } from './BuildingModels';
+import { BuildingFires, DECAL, DecalSet, PROP, PropLayer, setDecalParams, setPropParams, type PropInst } from './StreetProps';
 import { forestMask } from './Terrain';
 
 /**
@@ -36,14 +38,18 @@ function ihash(a: number, b: number, c: number): number {
 const HI = new Set(['DEU', 'FRA', 'GBR', 'BEL', 'NLD', 'LUX', 'CHE', 'AUT', 'CZE', 'SVK', 'POL', 'HUN', 'ROU', 'IRL', 'DNK', 'SVN', 'HRV', 'LIE', 'BGR', 'SRB', 'ITA']);
 const MID = new Set(['UKR', 'BLR', 'LTU', 'LVA', 'EST', 'MDA', 'ESP', 'PRT', 'GRC', 'ALB', 'MKD', 'BIH', 'MNE', 'KOS', 'TUR']);
 const LOW = new Set(['RUS', 'FIN', 'SWE', 'NOR', 'ISL', 'KAZ', 'GEO', 'ARM', 'AZE']);
-const MED = new Set(['ESP', 'PRT', 'ITA', 'GRC', 'TUR', 'MLT']);
+const MED = new Set(['ESP', 'PRT', 'ITA', 'GRC', 'TUR', 'MLT', 'MAR']);
 const NORDIC = new Set(['NOR', 'SWE', 'FIN', 'DNK', 'ISL']);
 
 const CROPS = [0xc8b46a, 0x7a9a48, 0x8a6a46, 0xb4b27c, 0x5f8a3a, 0xd2c27e, 0x6f9040];
 
 interface Field { x: number; z: number; w: number; d: number; rot: number; color: number; heights: Float32Array }
 
+type DecalDef = [number, number, number, number, number, number, number];
+
 interface Village {
+  props: PropInst[];
+  decals: DecalDef[];
   id: number; // cellIndex
   x: number; z: number;
   radius: number;
@@ -60,6 +66,8 @@ interface Village {
 interface Chunk {
   group: THREE.Group;
   layer: BuildingLayer | null;
+  props: PropLayer | null;
+  decals: DecalSet | null;
   fieldsMesh: THREE.Mesh | null;
   /** je Dorf: Offset im Layer */
   offsets: Map<number, number>;
@@ -117,6 +125,10 @@ export class Villages {
   private readonly dir = new THREE.Vector3();
   private readonly sph = new THREE.Sphere();
   private readonly infos = new Map<number, BuildingInfo>();
+  private readonly fires = new BuildingFires(24);
+  private readonly scorch: DecalSet;
+  private readonly scorchSlot = new Map<number, number>();
+  private lastT = 0;
 
   constructor(geo: GeoData, settings: Settings, cities?: Cities, graph?: NavGraph) {
     this.geo = geo;
@@ -132,6 +144,8 @@ export class Villages {
       fog: true,
     });
     this.group.name = 'Villages';
+    this.scorch = new DecalSet(geo, 256);
+    this.group.add(this.scorch.mesh, this.fires.object);
     this.object = this.group;
     this.exag = settings.heightExaggeration;
     this.applySettings(settings);
@@ -197,23 +211,39 @@ export class Villages {
     const style = MED.has(a3) ? 2 : NORDIC.has(a3) || lat < 0.12 ? 3 : 0;
     const walls = style === 2 ? WALL_MED : style === 3 ? WALL_NORDIC : WALL_WEST;
     const roofs = style === 2 ? ROOF_MED : style === 3 ? ROOF_NORDIC : ROOF_WEST;
+    const timberP = a3 === 'VAL' ? 0.55 : a3 === 'KRN' ? 0.4 : style === 0 ? 0.25 : 0;
     const ca = Math.cos(theta), sa = Math.sin(theta);
     const L = Math.ceil(n / 2) * 0.062;
     const data: number[] = [], typ: number[] = [], roof: number[] = [];
     const fields: Field[] = [];
+    const props: PropInst[] = [];
+    const decals: DecalDef[] = [];
     let k = 0;
-    const put = (a: number, b: number, w: number, h: number, d: number, rotLocal: number, type: number, wall: number, rf: number): void => {
-      if (typ.length >= 63) return;
-      const wx = x + a * ca + b * sa, wz = z - a * sa + b * ca;
+    const W = (a: number, b: number): [number, number] => [x + a * ca + b * sa, z - a * sa + b * ca];
+    const rotA = theta, rotB = theta - Math.PI / 2;
+    const prop = (p: number, a: number, b: number, rot: number, sc = 1, tint = 0.5, len = 1): void => {
+      const [wx, wz] = W(a, b);
       if (this.waterAt(wx, wz)) return;
+      props.push({ p, x: wx, z: wz, rot, s: sc, tint, len });
+    };
+    const decal = (kind: number, a: number, b: number, w: number, d: number, rot: number, seed: number): void => {
+      const [wx, wz] = W(a, b);
+      if (this.waterAt(wx, wz)) return;
+      decals.push([kind, wx, wz, w, d, rot, seed]);
+    };
+    const put = (a: number, b: number, w: number, h: number, d: number, rotLocal: number, type: number, wall: number, rf: number, timber = 0): boolean => {
+      if (typ.length >= 63) return false;
+      const wx = x + a * ca + b * sa, wz = z - a * sa + b * ca;
+      if (this.waterAt(wx, wz)) return false;
       const hw = Math.max(w, d) * 0.6;
       const base = Math.min(terrainHeightKm(g, wx - hw, wz - hw), terrainHeightKm(g, wx + hw, wz - hw), terrainHeightKm(g, wx - hw, wz + hw), terrainHeightKm(g, wx + hw, wz + hw), terrainHeightKm(g, wx, wz));
       data.push(wx, wz, w, h, d, theta + rotLocal + (rnd(40 + k) - 0.5) * 0.08, Math.max(0.0005, base), wall);
       typ.push(type);
-      roof.push(rf);
+      roof.push(((rf | ((type === BT.OLD || type === BT.VILLA ? timber : 0) << STYLE_SHIFT)) >>> 0));
+      return true;
     };
     const wallBase = pick(walls, rnd(1)), roofBase = pick(roofs, rnd(2));
-    // Häuser beidseits der Hauptstraße
+    // Häuser beidseits der Hauptstraße, mit Hofzaun, Garten, Baum, Schuppen
     const per = Math.ceil(n / 2);
     for (let side = 0; side < 2; side++) {
       for (let q = 0; q < per; q++) {
@@ -225,16 +255,84 @@ export class Villages {
         const w = 0.04 + r * 0.02, d = 0.032 + rnd(50 + k) * 0.01, h = 0.012 + rnd(60 + k) * 0.006;
         const wc = rnd(70 + k) < 0.55 ? wallBase : pick(walls, rnd(80 + k));
         const rc = rnd(90 + k) < 0.7 ? roofBase : pick(roofs, rnd(95 + k));
-        put(a, b, w, h, d, side === 0 ? 0 : Math.PI, style === 2 ? BT.HIP : rnd(100 + k) < 0.75 ? BT.OLD : BT.VILLA, wc, rc);
+        const timber = rnd(96 + k) < timberP ? 1 : 0;
+        const ok = put(a, b, w, h, d, side === 0 ? 0 : Math.PI, style === 2 ? BT.HIP : rnd(100 + k) < 0.75 ? BT.OLD : BT.VILLA, wc, rc, timber);
+        if (!ok) continue;
+        // Hof: Zaun (Straßenseite teils offen), Garten, Baum
+        const sg = side === 0 ? -1 : 1; // Richtung weg von der Straße
+        const pw = L / per * 0.5 - 0.002;
+        const bFront = b - sg * (d / 2 + 0.004), bBack = b + sg * (d / 2 + 0.038 + rnd(110 + k) * 0.02);
+        const fence = rnd(120 + k) < 0.55 ? PROP.FENCE : rnd(121 + k) < 0.5 ? PROP.HEDGE : PROP.WALL;
+        if (rnd(122 + k) < 0.85) {
+          const bm = (bFront + bBack) / 2, bl = Math.abs(bBack - bFront);
+          prop(fence, a - pw, bm, rotB, 1, 0.5, bl * 1000);
+          prop(fence, a + pw, bm, rotB, 1, 0.5, bl * 1000);
+          prop(fence, a, bBack, rotA, 1, 0.5, pw * 2000);
+          if (rnd(123 + k) < 0.55) prop(fence, a - pw * 0.5 - 0.004, bFront, rotA, 1, 0.5, pw * 1000 - 8);
+        }
+        if (rnd(124 + k) < 0.75) prop(rnd(125 + k) < 0.5 ? PROP.TREE_A : PROP.TREE_D, a + (rnd(126 + k) - 0.5) * pw, b + sg * (d / 2 + 0.018), rnd(127 + k) * 6.28, 0.6 + rnd(128 + k) * 0.5, rnd(129 + k));
+        if (rnd(130 + k) < 0.4) prop(PROP.BUSH, a + pw * 0.6, bFront - sg * 0.002, 0, 0.9, 0.5);
+        if (rnd(131 + k) < 0.4) prop(PROP.SHED, a - pw * 0.5, bBack - sg * 0.008, rotA, 0.8 + rnd(132 + k) * 0.3, rnd(133 + k));
+        if (rnd(134 + k) < 0.55) decal(DECAL.GARDEN, a + 0.004, b + sg * (d / 2 + 0.02), pw * 1.5, 0.024, rotA, rnd(135 + k));
+        if (rnd(136 + k) < 0.12) prop(PROP.WELL, a + pw * 0.4, b - sg * (d / 2 - 0.004), 0, 1, 0.5);
+        if (rnd(137 + k) < 0.18) prop(rnd(138 + k) < 0.5 ? PROP.CAR0 : PROP.VAN, a - pw * 0.3, b - sg * (d / 2 + 0.008), rotA, 1, rnd(139 + k));
+        if (rnd(140 + k) < 0.09) prop(PROP.HAY, a - pw * 0.7, bBack - sg * 0.004, 0, 0.9, 0.5);
       }
     }
-    // Kirche (größere Dörfer) und Scheunen
-    if (n >= 22) put((rnd(3) - 0.5) * L * 0.4, 0.09, 0.075, 0.07, 0.036, Math.PI, BT.CHURCH, pick(WALL_WEST, rnd(4)), 0x5a5d62);
+    // Kirche (größere Dörfer) mit Friedhof, Kapelle (mittlere) und Wirtschaftsgebäude
+    const churchA = (rnd(3) - 0.5) * L * 0.4;
+    if (n >= 22) {
+      put(churchA, 0.09, 0.075, 0.07, 0.036, Math.PI, BT.CHURCH, pick(WALL_WEST, rnd(4)), 0x5a5d62);
+      // Friedhof hinter der Kirche
+      const cb = 0.155, cw = 0.07, cd = 0.05;
+      decal(DECAL.CEMETERY, churchA + 0.02, cb, cw, cd, rotA, rnd(5));
+      for (let gy = 0; gy < 4; gy++)
+        for (let gx = 0; gx < 7; gx++) {
+          if (rnd(300 + gy * 7 + gx) < 0.18) continue;
+          prop(rnd(310 + gy * 7 + gx) < 0.3 ? PROP.CROSS : PROP.GRAVE, churchA + 0.02 - cw * 0.35 + gx * 0.0085, cb - cd * 0.32 + gy * 0.0125, rotB + Math.PI / 2, 1, 0.5);
+        }
+      prop(PROP.WALL, churchA + 0.02, cb - cd / 2, rotA, 1, 0.5, cw * 1000);
+      prop(PROP.WALL, churchA + 0.02, cb + cd / 2, rotA, 1, 0.5, cw * 1000);
+      prop(PROP.WALL, churchA + 0.02 - cw / 2, cb, rotB, 1, 0.5, cd * 1000);
+      prop(PROP.WALL, churchA + 0.02 + cw / 2, cb, rotB, 1, 0.5, cd * 1000);
+      for (let t = 0; t < 4; t++) prop(PROP.TREE_C, churchA - 0.04 + t * 0.05, 0.065 + (t % 2) * 0.01, rnd(320 + t) * 6.28, 0.9, rnd(330 + t));
+    } else if (n >= 11 && rnd(6) < 0.6) {
+      put((rnd(7) - 0.5) * L * 0.5, -0.10, 0.035, 0.022, 0.02, 0, BT.CHAPEL, pick(WALL_WEST, rnd(8)), 0x5a5d62);
+      prop(PROP.TREE_D, (rnd(7) - 0.5) * L * 0.5 + 0.03, -0.10, 0, 1, 0.4);
+    }
     const barns = Math.floor(n / 9) + (n > 8 ? 1 : 0);
     for (let q = 0; q < barns; q++) {
       const a = (rnd(110 + q) - 0.5) * L;
       const side = q % 2 === 0 ? 1 : -1;
-      put(a, side * (0.095 + rnd(120 + q) * 0.015), 0.05 + rnd(130 + q) * 0.015, 0.013, 0.03, side > 0 ? Math.PI : 0, BT.BARN, pick([0x8a5a3c, 0x9a6a44, 0x7a5a40, 0xa89070], rnd(140 + q)), pick([0x6a4a3a, 0x7a3a2e, 0x5a5a5e], rnd(145 + q)));
+      const bb = side * (0.095 + rnd(120 + q) * 0.015);
+      put(a, bb, 0.05 + rnd(130 + q) * 0.015, 0.013, 0.03, side > 0 ? Math.PI : 0, BT.BARN, pick([0x8a5a3c, 0x9a6a44, 0x7a5a40, 0xa89070], rnd(140 + q)), pick([0x6a4a3a, 0x7a3a2e, 0x5a5a5e], rnd(145 + q)));
+      // Hoffläche, Heu, Ballen, Traktor
+      decal(DECAL.YARD, a, bb - side * 0.03, 0.09, 0.05, rotA, rnd(350 + q));
+      for (let h = 0; h < 1 + Math.floor(rnd(360 + q) * 3); h++) prop(PROP.HAY, a + 0.04 + h * 0.012, bb + side * 0.03 + (h % 2) * 0.006, 0, 0.9 + rnd(370 + h) * 0.3, 0.5);
+      for (let h = 0; h < 3; h++) prop(PROP.BALE, a - 0.045 + h * 0.008, bb + side * 0.034, rotA, 0.9, 0.5);
+      if (rnd(380 + q) < 0.55) {
+        prop(PROP.TRACTOR, a - 0.02, bb - side * 0.032, rotA + (rnd(381 + q) < 0.5 ? 0 : Math.PI), 1, 0.5);
+        if (rnd(382 + q) < 0.6) prop(PROP.TRAILER, a - 0.007, bb - side * 0.032, rotA, 1, 0.5);
+      }
+      if (n > 14 && rnd(390 + q) < 0.45) put(a + 0.07, bb, 0.04, 0.04 + rnd(391 + q) * 0.02, 0.04, 0, BT.SILO, 0xb9b5aa, 0x888880);
+      if (n >= 14 && rnd(395 + q) < 0.5) put(a - 0.06, bb + side * 0.01, 0.06, 0.008, 0.025, side > 0 ? Math.PI : 0, BT.STABLE, pick([0x8a5a3c, 0xa89070, 0x9a8a78], rnd(396 + q)), pick([0x6a4a3a, 0x5a5a5e], rnd(397 + q)));
+    }
+    // Dorfteich
+    if (rnd(400) < 0.4) {
+      const pa = (rnd(401) - 0.5) * L * 0.6, pb = (rnd(402) < 0.5 ? -1 : 1) * (0.2 + rnd(403) * 0.05);
+      decal(DECAL.POND, pa, pb, 0.08 + rnd(404) * 0.03, 0.06, rotA, rnd(405));
+      for (let t = 0; t < 4; t++) prop(PROP.TREE_D, pa + (rnd(406 + t) - 0.5) * 0.1, pb + (rnd(410 + t) - 0.5) * 0.08, rnd(414 + t) * 6.28, 0.9, rnd(418 + t));
+    }
+    // Obstgarten / Weinberg
+    const orch = rnd(420) < 0.25 && n > 8;
+    if (orch) {
+      const oa = (rnd(421) - 0.5) * L * 0.4, ob = (rnd(422) < 0.5 ? -1 : 1) * 0.34;
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 5; j++) prop(PROP.TREE_A, oa + i * 0.011, ob + j * 0.011, rnd(423 + i + j * 6) * 6.28, 0.9, rnd(460 + i + j * 6));
+    }
+    if ((style === 2 || a3 === 'VAL') && !orch && n > 6 && rnd(430) < (style === 2 ? 0.55 : 0.3) && hk > 0.005) {
+      const va = (rnd(431) - 0.5) * L * 0.3, vb = (rnd(432) < 0.5 ? -1 : 1) * 0.3;
+      decal(DECAL.VINEYARD, va, vb + 0.02, 0.12, 0.062, rotA, rnd(433));
+      for (let rw = 0; rw < 9; rw++) prop(PROP.VINE, va, vb + 0.0035 + rw * 0.0066, rotA, 1, 0.5, 120);
     }
     // Felder
     const nf = 2 + Math.floor(n / 9) + Math.floor(rnd(150) * 3);
@@ -242,7 +340,7 @@ export class Villages {
       const side = q % 2 === 0 ? 1 : -1;
       const w = 0.12 + rnd(160 + q) * 0.18, d = 0.09 + rnd(170 + q) * 0.13;
       const a = (rnd(180 + q) - 0.5) * (L + 0.3);
-      const b = side * (0.16 + d / 2 + rnd(190 + q) * 0.12);
+      const b = side * (0.16 + d / 2 + rnd(190 + q) * 0.12 + (orch ? 0.1 : 0));
       const wx = x + a * ca + b * sa, wz = z - a * sa + b * ca;
       if (this.waterAt(wx, wz) || this.waterAt(wx + w * 0.4 * ca, wz - w * 0.4 * sa)) continue;
       const heights = new Float32Array(5 * 5);
@@ -257,7 +355,7 @@ export class Villages {
     const cnt = typ.length;
     const vill: Village = {
       id, x, z, radius: Math.max(L / 2 + 0.1, 0.15) + 0.06, country: a3, pop: cnt * 4, n: cnt,
-      data: new Float32Array(data), typ: Uint8Array.from(typ), roof: Uint32Array.from(roof), integ: new Float32Array(cnt).fill(1), fields,
+      data: new Float32Array(data), typ: Uint8Array.from(typ), roof: Uint32Array.from(roof), integ: new Float32Array(cnt).fill(1), fields, props, decals,
     };
     return vill;
   }
@@ -339,6 +437,7 @@ export class Villages {
     v.integ[i] = Math.max(0, v.integ[i] - amount);
     const info = this.info(v, i);
     info.integrity = v.integ[i];
+    this.hazards(v, i);
     // geladenen Chunk aktualisieren
     const ck = this.chunkKey(Math.floor(v.x / CHUNK_KM), Math.floor(v.z / CHUNK_KM));
     const ch = this.chunks.get(ck);
@@ -351,6 +450,21 @@ export class Villages {
       }
     }
     return true;
+  }
+
+  /** Brand/Brandfleck eines Hauses (Integrität < 0.35 brennt 60..120 s, Trümmer hinterlassen einen Brandfleck) */
+  private hazards(v: Village, i: number): void {
+    const o = i * STRIDE, d = v.data;
+    const id = ID_OFFSET + v.id * 64 + i;
+    const g = v.integ[i];
+    if (g < BUILDING_DAMAGED_BELOW) {
+      const dur = 60 + 60 * Math.abs((Math.sin(id * 78.233) * 43758.5453) % 1);
+      this.fires.ignite(id, d[o], d[o + 1], d[o + 6], d[o + 3] * (g <= 0 ? 0.3 : 0.75), Math.max(d[o + 2], d[o + 4]) * 0.5, dur);
+    } else this.fires.extinguish(id);
+    if (g <= 0 && !this.scorchSlot.has(id)) {
+      const sz = Math.max(0.04, Math.max(d[o + 2], d[o + 4]) * 1.9);
+      this.scorchSlot.set(id, this.scorch.add(DECAL.SCORCH, d[o], d[o + 1], sz, sz * 0.9, d[o + 5], (id % 97) / 97));
+    }
   }
 
   // ------------------------------------------------------------------ Streaming
@@ -368,7 +482,7 @@ export class Villages {
         const v = this.village(ci * CHUNK_CELLS + i, cj * CHUNK_CELLS + j);
         if (v) vills.push(v);
       }
-    const chunk: Chunk = { group, layer: null, fieldsMesh: null, offsets: new Map(), integ: new Float32Array(0), cx: (ci + 0.5) * CHUNK_KM, cz: (cj + 0.5) * CHUNK_KM };
+    const chunk: Chunk = { group, layer: null, props: null, decals: null, fieldsMesh: null, offsets: new Map(), integ: new Float32Array(0), cx: (ci + 0.5) * CHUNK_KM, cz: (cj + 0.5) * CHUNK_KM };
     if (vills.length) {
       let total = 0;
       for (const v of vills) total += v.n;
@@ -409,6 +523,22 @@ export class Villages {
               idx.push(a, cc, b, b, cc, d);
             }
         }
+      const plist: PropInst[] = [];
+      const dlist: DecalDef[] = [];
+      for (const v of vills) {
+        for (const q of v.props) plist.push(q);
+        for (const q of v.decals) dlist.push(q);
+      }
+      if (plist.length) {
+        chunk.props = new PropLayer(this.geo, plist, CHUNK_KM);
+        group.add(chunk.props.group);
+      }
+      if (dlist.length) {
+        const ds = new DecalSet(this.geo, dlist.length);
+        for (const q of dlist) ds.add(q[0], q[1], q[2], q[3], q[4], q[5], q[6]);
+        chunk.decals = ds;
+        group.add(ds.mesh);
+      }
       if (pos.length) {
         const g = new THREE.BufferGeometry();
         g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -432,6 +562,8 @@ export class Villages {
     if (!ch) return;
     this.group.remove(ch.group);
     ch.fieldsMesh?.geometry.dispose();
+    ch.props?.dispose();
+    ch.decals?.dispose();
     if (ch.layer) {
       ch.layer.group.traverse((o) => {
         const m = o as THREE.InstancedMesh;
@@ -453,6 +585,14 @@ export class Villages {
     }
     this.group.visible = true;
     this.fieldMat.uniforms.uLift.value = THREE.MathUtils.clamp(0.015 + D * 0.0035, 0.015, 0.6);
+    setPropParams(this.exag, D);
+    setDecalParams(this.exag, D);
+    const nowS = performance.now() / 1000;
+    const dtS = this.lastT > 0 ? Math.min(0.1, nowS - this.lastT) : 0;
+    this.lastT = nowS;
+    this.fires.setExag(this.exag);
+    this.fires.update(dtS, camera, nowS % 4096);
+    getBuildingMaterial().uniforms.uTime.value = nowS % 4096;
     camera.updateMatrixWorld();
     this.pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.pv);
@@ -491,7 +631,10 @@ export class Villages {
       this.buildChunk(w.i, w.j);
       if (++built >= MAX_BUILDS_PER_FRAME) break;
     }
-    for (const ch of this.chunks.values()) ch.layer?.update(camera.position, true, 24, 120);
+    for (const ch of this.chunks.values()) {
+      ch.layer?.update(camera.position, true, 24, 120);
+      ch.props?.update(camera.position, 10);
+    }
   }
 
   applySettings(s: Settings): void {

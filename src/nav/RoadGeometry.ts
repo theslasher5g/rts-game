@@ -18,7 +18,7 @@ import { cityRadiusKm } from '../world/Cities';
 export const TILE_KM = 6;
 export const STEP_KM = 0.0625;
 /** Straßenmaßstab: Faktor je km Kameraabstand und Obergrenze */
-export const SCALE_K = 0.9;
+export const SCALE_K = 1.1;
 export const SCALE_MAX = 14;
 
 // ----------------------------------------------------------------------- Hash
@@ -50,9 +50,9 @@ export const HALF_WIDTH_M: Record<string, number> = {
   motorway: 13.7,
   primary: 5.5,
   secondary: 4.2,
-  road: 3.6,
-  track: 3.2,
-  rail: 3.8,
+  road: 4.2,
+  track: 4.0,
+  rail: 4.4,
   ferry: 0,
 };
 
@@ -217,11 +217,37 @@ export class RoadNet {
     if (st) return st;
     const g = this.graph.edges[eid].geom;
     const out: number[] = [g[0], g[1]];
+    const cell = this.geo.cellKm;
+    const ts: number[] = [];
     for (let k = 2; k < g.length; k += 2) {
       const px = g[k - 2], pz = g[k - 1];
       const dx = g[k] - px, dz = g[k + 1] - pz;
-      const cnt = Math.max(1, Math.ceil(Math.hypot(dx, dz) / STEP_KM));
-      for (let q = 1; q < cnt; q++) out.push(px + (dx * q) / cnt, pz + (dz * q) / cnt);
+      const len = Math.hypot(dx, dz);
+      const cnt = Math.max(1, Math.ceil(len / STEP_KM));
+      ts.length = 0;
+      for (let q = 1; q < cnt; q++) ts.push(q / cnt);
+      // Knicklinien des Geländegitters (Zellkanten + Diagonale): Stützpunkte genau dort -> Band liegt je Dreieck eben
+      if (Math.abs(dx) > 1e-9) {
+        const a = Math.floor(Math.min(px, px + dx) / cell) + 1, b = Math.floor(Math.max(px, px + dx) / cell);
+        for (let m = a; m <= b; m++) { const t = (m * cell - px) / dx; if (t > 0 && t < 1) ts.push(t); }
+      }
+      if (Math.abs(dz) > 1e-9) {
+        const a = Math.floor(Math.min(pz, pz + dz) / cell) + 1, b = Math.floor(Math.max(pz, pz + dz) / cell);
+        for (let m = a; m <= b; m++) { const t = (m * cell - pz) / dz; if (t > 0 && t < 1) ts.push(t); }
+      }
+      if (Math.abs(dx + dz) > 1e-9) {
+        const sum0 = px + pz, sum1 = sum0 + dx + dz;
+        const a = Math.floor(Math.min(sum0, sum1) / cell) + 1, b = Math.floor(Math.max(sum0, sum1) / cell);
+        for (let m = a; m <= b; m++) { const t = (m * cell - sum0) / (dx + dz); if (t > 0 && t < 1) ts.push(t); }
+      }
+      ts.sort((u, v) => u - v);
+      let last = 0;
+      const minT = 0.002 / Math.max(len, 1e-6);
+      for (const t of ts) {
+        if (t - last < minT || 1 - t < minT) continue;
+        out.push(px + dx * t, pz + dz * t);
+        last = t;
+      }
       out.push(g[k], g[k + 1]);
     }
     const n = out.length / 2;
@@ -327,6 +353,14 @@ export class RoadNet {
   }
 }
 
+const netCache = new WeakMap<NavGraph, RoadNet>();
+/** Ein RoadNet je NavGraph (geteilt von RoadRenderer und BridgeRenderer) */
+export function getRoadNet(geo: GeoData, graph: NavGraph): RoadNet {
+  let n = netCache.get(graph);
+  if (!n) netCache.set(graph, (n = new RoadNet(geo, graph)));
+  return n;
+}
+
 // ----------------------------------------------------------------------- Band-Builder
 
 /**
@@ -365,8 +399,9 @@ export class RibbonBuilder {
       const px = -st.tz[i], pz = st.tx[i];
       const hw = (hwM * 0.001) * (hwEndScale ? hwEndScale(i) : 1);
       const a = this.vertex(x, z, px, pz, -1, latOffKm, st.cum[i], hw, type, closed);
+      this.vertex(x, z, px, pz, 0, latOffKm, st.cum[i], hw, type, closed);
       this.vertex(x, z, px, pz, 1, latOffKm, st.cum[i], hw, type, closed);
-      if (i > i0) this.idx.push(a - 2, a - 1, a, a - 1, a + 1, a);
+      if (i > i0) this.idx.push(a - 3, a - 2, a, a - 2, a + 1, a, a - 2, a - 1, a + 1, a - 1, a + 2, a + 1);
     }
     if (edge >= 0) {
       let arr = this.ranges.get(edge);

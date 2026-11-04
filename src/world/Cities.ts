@@ -4,7 +4,7 @@ import type { Settings } from '../core/types';
 import { bus } from '../core/EventBus';
 import type { BuildingInfo } from '../combat/types';
 import {
-  BT, BT_COUNT, FAR_TOP, RUBBLE_VARIANTS, GEO_ATTRS, STYLE_SHIFT, getModels, getFarGeo, getBuildingMaterial, rngFrom, terrainHeightKm,
+  BT, BT_COUNT, FAR_TOP, SINK, RUBBLE_VARIANTS, GEO_ATTRS, STYLE_SHIFT, getModels, getFarGeo, getBuildingMaterial, rngFrom, terrainHeightKm,
   type BuildingMaterial,
 } from './BuildingModels';
 import { BuildingFires, DecalSet, DECAL, StreetLife, setDecalParams, setPropParams, type StreetGrid } from './StreetProps';
@@ -35,8 +35,6 @@ export const BUILDING_LIGHT_BELOW = 0.75;
 const RUBBLE_FRAC = 0.12;
 const RUBBLE_MIN_H = 0.008;
 const RUBBLE_COLOR = 0x3f3b36;
-/** Gebäude-Einsenkung in den Boden (km) */
-const SINK = 0.03;
 
 /** Ausdehnung (km) der Bebauung einer Stadt – auch für Vegetations-/Dorf-Ausschluss */
 export function cityRadiusKm(pop: number, capital: boolean): number {

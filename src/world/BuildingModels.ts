@@ -37,6 +37,8 @@ export const BT_COUNT = 14;
 export const FAR_TOP = [0.8, 0.8, 0.93, 0.95, 0.65, 0.8, 1, 0.96, 0.5, 0.85, 0.75, 0.7, 0.55, 0.6];
 /** Anzahl Trümmer-Varianten */
 export const RUBBLE_VARIANTS = 3;
+/** Gebäude-Einsenkung in den Boden (km, Welteinheiten); Modell-y = 0 liegt auf Geländehöhe, Details darunter bilden den Sockel */
+export const SINK = 0.03;
 /** Stil-Bits (in roof >>> 24): 0 Putz, 1 Fachwerk, 2 Ziegel, 3 Weißkalk */
 export const STYLE_SHIFT = 24;
 
@@ -104,6 +106,8 @@ export class GB {
   det: number[] = [];
   i: number[] = [];
   col: V3 = [1, 1, 1];
+  /** true: keine y-Umrechnung (Fern-Quader) */
+  far = false;
   private A: V3 = [0, 0, 0];
   private flags = 0;
   private gSalt = 0;
@@ -159,7 +163,7 @@ export class GB {
       this.s.push(f, axis, part);
       this.z.push(sw, sh);
       this.vc.push(this.col[0], this.col[1], this.col[2]);
-      this.anc.push(this.A[0], this.A[1], this.A[2], fl);
+      this.anc.push(this.A[0], this.A[1], this.A[2], this.far ? 8 : fl);
       this.det.push(this.gSalt, this.gThr, this.gLim, this.gBase);
     }
     if (P.length === 4) {
@@ -616,7 +620,7 @@ function parapet(g: GB, y: number, h = 0.9, thick = 0.35, col: V3 = COL.concrete
 function protoOld(): GB {
   const g = new GB();
   const e = 0.62, r = 0.92;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 0, endF: -1, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, e, 0.5, { f: 0, endF: -1, top: 0 });
   bands(g, e, { plinth: true, cornice: true });
   g.gable(-0.5, 0.5, e, r, -0.5, 0.5, 0);
   gutters(g, e);
@@ -647,7 +651,7 @@ function protoOld(): GB {
 function protoHip(): GB {
   const g = new GB();
   const e = 0.6, r = 0.92;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 8, endF: 8, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, e, 0.5, { f: 8, endF: 8, top: 0 });
   bands(g, e, { plinth: true, cornice: true, corniceCol: lin(0xe8dfc8) });
   g.hip(-0.5, 0.5, e, r, -0.5, 0.5, 0.2);
   gutters(g, e, 0.03, true);
@@ -678,7 +682,7 @@ function protoHip(): GB {
 function protoMid(): GB {
   const g = new GB();
   const top = 0.93;
-  g.box(-0.5, 0, -0.5, 0.5, top, 0.5, { f: 2, endF: -1, topPart: 4 });
+  g.box(-0.5, -0.4, -0.5, 0.5, top, 0.5, { f: 2, endF: -1, topPart: 4 });
   bands(g, top, { plinth: true, cornice: true, corniceCol: lin(0xb8b4aa) });
   parapet(g, top, 0.9, 0.3, COL.concrete);
   g.c3(COL.tar).box(-0.49, top + 0.001, -0.49, 0.49, top + 0.001, 0.49, { top: 1, topPart: 5, sides: 0 });
@@ -706,7 +710,7 @@ function protoMid(): GB {
 function protoPlatte(): GB {
   const g = new GB();
   const top = 0.95;
-  g.box(-0.5, 0, -0.5, 0.5, top, 0.5, { f: 1, endF: -1, topPart: 4 });
+  g.box(-0.5, -0.4, -0.5, 0.5, top, 0.5, { f: 1, endF: -1, topPart: 4 });
   bands(g, top, { plinth: true, corniceCol: lin(0xa8a69e) });
   parapet(g, top, 0.7, 0.25, lin(0x9e9c94));
   // Treppenhaus-Türme (Vorderseite) + Laubengang
@@ -727,8 +731,8 @@ function protoPlatte(): GB {
   }
   g.c3(COL.concrete);
   roofUnits(g, top + 0.002, 62, [[-0.35, 0.1, 1, 1.0], [0.15, -0.1, 1, 1.0], [0.4, 0.2, 0, 0.7], [-0.1, 0.3, 0, 0.6], [0.0, -0.3, 2, 0.4]]);
-  tvAntenna(g, 0.1, top + 0.002, 0.2, 0.9, 63);
-  tvAntenna(g, -0.2, top + 0.002, -0.2, 0.7, 64);
+  tvAntenna(g, 0.1, top + 0.002, 0.2, 0.5, 63);
+  tvAntenna(g, -0.2, top + 0.002, -0.2, 0.3, 64);
   for (let k = 0; k < 5; k++) dish(g, -0.4 + k * 0.2, 0.2 + (k % 3) * 0.12, 0.5, 0.5, 65 + k, 1);
   // Stufen vor den Treppenhäusern
   g.c3(COL.concrete);
@@ -740,8 +744,8 @@ function protoPlatte(): GB {
   }
   g.white();
   // Garagen-/Müllhaus am Gebäudefuß
-  g.c3(COL.metal).at(0.42, 0, 0.5, AX | AZ).gate(73, 0.6);
-  g.box(-1.0, 0, 0.5, 1.0, 1.6, 2.0, { part: 5, topPart: 5 });
+  g.c3(COL.metal).at(0.42, 0, 0.5, AALL).gate(73, 0.6);
+  g.box(-1.5, -0.3, 0.5, 1.5, 2.2, 3.0, { part: 5, topPart: 5 });
   g.ungate().rel().white();
   return g;
 }
@@ -749,7 +753,7 @@ function protoPlatte(): GB {
 function protoHall(): GB {
   const g = new GB();
   const e = 0.6;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 4, endF: 4, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, e, 0.5, { f: 4, endF: 4, top: 0 });
   g.c3(COL.concrete);
   bands(g, e, { plinth: true });
   const n = 4;
@@ -789,10 +793,8 @@ function protoHall(): GB {
   // Personaleingang + Büroanbau (Ecke, Flachdach)
   entrance(g, 0.43, 80, 0.8);
   g.c3(lin(0xc9c6bc));
-  g.at(-0.5, 0, 0.5, AX | AY | AZ);
-  g.rel();
-  g.at(-0.5, 0, 0.5, AX | AZ);
-  g.box(-3.0, 0, -9, 9.0, 4.6, 5.0, { part: 5, topPart: 5 });
+  g.at(-0.5, 0, 0.5, AALL);
+  g.box(-3.0, -0.3, -9, 9.0, 4.6, 5.0, { part: 5, topPart: 5 });
   g.rel().white();
   // Rohre an der Seitenwand, Dachlüfter, Schornstein
   g.c3(COL.pipe);
@@ -816,7 +818,7 @@ function protoHall(): GB {
 
 function protoSilo(): GB {
   const g = new GB();
-  g.tube(0, 0, 0, 0.78, 0.5, 0.5, 10, 4, -1);
+  g.tube(0, 0, -0.4, 0.78, 0.5, 0.5, 10, 4, -1);
   g.tube(0, 0, 0.78, 0.92, 0.5, 0.3, 10, 4, -1);
   g.tube(0, 0, 0.92, 1.0, 0.3, 0.05, 10, 2, 2);
   // Ringbänder
@@ -855,7 +857,7 @@ function protoStack(): GB {
   const bands4 = [0, 0.14, 0.28, 0.42, 0.56, 0.7, 0.84];
   // rot-weiß geringelt in der oberen Hälfte
   const radius = (y: number) => 0.5 - 0.23 * y;
-  g.c3(COL.concrete).tube(0, 0, 0, 0.14, radius(0), radius(0.14), 10, 5, -1);
+  g.c3(COL.concrete).tube(0, 0, -0.4, 0.14, radius(0), radius(0.14), 10, 5, -1);
   for (let k = 1; k < bands4.length; k++) {
     g.c3(k % 2 ? COL.red : COL.white);
     const y0 = bands4[k], y1 = k + 1 < bands4.length ? bands4[k + 1] : 1.0;
@@ -881,7 +883,7 @@ function protoStack(): GB {
 
 function protoTower(): GB {
   const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.66, 0.5, { f: 3, endF: 3, topPart: 4 });
+  g.box(-0.5, -0.4, -0.5, 0.5, 0.66, 0.5, { f: 3, endF: 3, topPart: 4 });
   g.box(-0.38, 0.66, -0.38, 0.38, 0.86, 0.38, { f: 7, endF: 7, topPart: 4 });
   g.box(-0.26, 0.86, -0.26, 0.26, 0.96, 0.26, { f: 7, endF: 7, topPart: 4 });
   // Sockel / Lobby, Vordach
@@ -945,7 +947,7 @@ function bandsAt(g: GB, y: number, half: number, col: V3): void {
 function protoChurch(): GB {
   const g = new GB();
   const e = 0.26;
-  g.box(-0.5, 0, -0.3, 0.15, e, 0.3, { f: 5, endF: -1, top: 0 });
+  g.box(-0.5, -0.4, -0.3, 0.15, e, 0.3, { f: 5, endF: -1, top: 0 });
   g.gable(-0.5, 0.15, e, 0.4, -0.3, 0.3, 0, 6, 0.04, 0.0);
   g.c3(lin(0x7a7a72));
   g.at(0, 0, 0, AY);
@@ -967,7 +969,7 @@ function protoChurch(): GB {
   g.tube(-0.5, 0, e, 0.4, 0.3, 0.02, 6, 5, 5);
   g.white();
   // Turm
-  g.box(0.15, 0, -0.17, 0.5, 0.5, 0.17, { f: 5, endF: 5, topPart: 2 });
+  g.box(0.15, -0.4, -0.17, 0.5, 0.5, 0.17, { f: 5, endF: 5, topPart: 2 });
   g.c3(lin(0xb4ab9a));
   g.box(0.15, 0.46, -0.19, 0.5, 0.5, 0.19, { part: 5, topPart: 5 });
   g.white();
@@ -987,8 +989,8 @@ function protoChurch(): GB {
   g.prism([0, 0, 0.1], [0.4, 0, 0.1], 0.04, 5, false);
   g.rel().white();
   // Portal + Stufen
-  g.c3(COL.concrete).at(0.5, 0, 0, AX | AZ);
-  g.box(0.0, 0, -1.8, 1.0, 0.5, 1.8, { part: 5, topPart: 5 });
+  g.c3(COL.concrete).at(0.5, 0, 0, AALL);
+  g.box(0.0, -0.2, -1.8, 1.0, 0.5, 1.8, { part: 5, topPart: 5 });
   g.c3(COL.wood);
   g.at(0.5, 0, 0, AALL);
   g.quad([0.015, 0.5, -0.8], [0.015, 0.5, 0.8], [0.015, 3.6, 0.8], [0.015, 3.6, -0.8], [1, 0, 0], -1, 1, 5);
@@ -1011,7 +1013,7 @@ function protoChurch(): GB {
 
 function protoWare(): GB {
   const g = new GB();
-  g.box(-0.5, 0, -0.5, 0.5, 0.8, 0.5, { f: 4, endF: -1, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, 0.8, 0.5, { f: 4, endF: -1, top: 0 });
   bands(g, 0.8, { plinth: true });
   g.gable(-0.5, 0.5, 0.8, 0.96, -0.5, 0.5, 0, 5, 0.02, 0.01);
   gutters(g, 0.8, 0.02, true);
@@ -1042,7 +1044,7 @@ function protoWare(): GB {
 function protoVilla(): GB {
   const g = new GB();
   const e = 0.52, r = 0.92;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 6, endF: -1, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, e, 0.5, { f: 6, endF: -1, top: 0 });
   bands(g, e, { plinth: true, cornice: false });
   g.gable(-0.5, 0.5, e, r, -0.5, 0.5, 0, 6, 0.04, 0.03);
   gutters(g, e, 0.04, true);
@@ -1056,8 +1058,8 @@ function protoVilla(): GB {
   dish(g, 0.35, 0.3, 0.5, 0.3, 125, 1);
   // Veranda / Vorbau mit Giebeldach
   g.c3(lin(0xd8d0b8));
-  g.at(-0.17, 0, 0.5, AX | AZ);
-  g.box(-2.0, 0, 0, 2.0, 3.0, 2.6, { part: 5, topPart: 5, top: 0 });
+  g.at(-0.17, 0, 0.5, AALL);
+  g.box(-2.0, -0.3, 0, 2.0, 3.0, 2.6, { part: 5, topPart: 5, top: 0 });
   g.rel();
   g.at(-0.17, 3.0, 0.5, AALL);
   g.c3(COL.tile);
@@ -1085,7 +1087,7 @@ function protoVilla(): GB {
 function protoBarn(): GB {
   const g = new GB();
   const e = 0.42;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 10, endF: 10, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, e, 0.5, { f: 10, endF: 10, top: 0 });
   g.gable(-0.5, 0.5, e, 1.0, -0.5, 0.5, 0, 7, 0.03, 0.03);
   g.c3(lin(0x5a4a3a));
   g.at(0, 0, 0.5, AALL);
@@ -1114,8 +1116,8 @@ function protoBarn(): GB {
   g.rel().white();
   // Seitenschuppen / Heulager
   g.c3(lin(0x7a6a58));
-  g.at(0.5, 0, -0.1, AX | AZ).gate(130, 0.5);
-  g.box(0, 0, -2.4, 3.2, 2.8, 2.4, { part: 5, topPart: 5 });
+  g.at(0.5, 0, -0.1, AALL).gate(130, 0.5);
+  g.box(0, -0.3, -2.4, 3.2, 2.8, 2.4, { part: 5, topPart: 5 });
   g.c3(lin(0x5a5a5e));
   g.quad([0, 2.8, 2.6], [3.4, 2.1, 2.6], [3.4, 2.1, -2.6], [0, 2.8, -2.6], [0, 1, 0], -1, 0, 5);
   g.ungate().rel().white();
@@ -1125,7 +1127,7 @@ function protoBarn(): GB {
 function protoStable(): GB {
   const g = new GB();
   const e = 0.5;
-  g.box(-0.5, 0, -0.5, 0.5, e, 0.5, { f: 11, endF: -1, top: 0 });
+  g.box(-0.5, -0.4, -0.5, 0.5, e, 0.5, { f: 11, endF: -1, top: 0 });
   g.gable(-0.5, 0.5, e, 0.92, -0.5, 0.5, 0, 5, 0.06, 0.03);
   bands(g, e, { plinth: true });
   gutters(g, e, 0.06, true);
@@ -1147,10 +1149,10 @@ function protoStable(): GB {
 function protoChapel(): GB {
   const g = new GB();
   const e = 0.38;
-  g.box(-0.5, 0, -0.32, 0.18, e, 0.32, { f: 5, endF: -1, top: 0 });
+  g.box(-0.5, -0.4, -0.32, 0.18, e, 0.32, { f: 5, endF: -1, top: 0 });
   g.gable(-0.5, 0.18, e, 0.62, -0.32, 0.32, 0, 5, 0.04, 0.0);
   bands(g, e, { plinth: true });
-  g.box(0.18, 0, -0.2, 0.5, 0.65, 0.2, { f: 5, endF: 5, topPart: 2 });
+  g.box(0.18, -0.4, -0.2, 0.5, 0.65, 0.2, { f: 5, endF: 5, topPart: 2 });
   g.pyramid(0.34, 0, 0.2, 0.2, 0.65, 1.0, 1, 4);
   g.c3(COL.metal).at(0.34, 1.0, 0, AALL);
   g.prism([0, 0, 0], [0, 1.8, 0], 0.06, 5);
@@ -1169,6 +1171,7 @@ function protoChapel(): GB {
 
 function protoFar(top: number): GB {
   const g = new GB();
+  g.far = true;
   g.box(-0.5, 0, -0.5, 0.5, top, 0.5, { f: -1, endF: -1, topPart: 1 });
   return g;
 }
@@ -1194,12 +1197,12 @@ function heavyShell(g: GB, o: HeavyOpt): void {
   const rnd = rngFrom('heavy' + o.seed);
   const e = o.e;
   const nc = 8;
-  const sootCol = COL.soot;
+  const sootCol = lin(0x3a342e);
   const breachX = o.breachX ?? Math.floor(rnd() * 3 + 2);
   const wall = (side: 0 | 1 | 2 | 3) => {
     // 0 = +z (Front), 1 = -z, 2 = +x, 3 = -x
     const tops: number[] = [];
-    for (let k = 0; k <= nc; k++) tops.push(e * (0.5 + 0.5 * rnd()) * (o.ragged ?? 1));
+    for (let k = 0; k <= nc; k++) tops.push(e * (0.68 + 0.32 * rnd()) * (o.ragged ?? 1));
     // Eckstehende Pfeiler höher
     tops[0] = e * (0.85 + 0.15 * rnd());
     tops[nc] = e * (0.7 + 0.3 * rnd());
@@ -1226,10 +1229,10 @@ function heavyShell(g: GB, o: HeavyOpt): void {
         // Mauerkrone (dünne Oberkante)
         g.c3(mulc(COL.plaster, 0.55));
       };
-      if (!inBreach) addSeg(0, ta, 0, tb);
+      if (!inBreach) addSeg(-0.4, ta, -0.4, tb);
       else {
         const hy0 = e * (0.1 + 0.08 * rnd()), hy1 = e * (0.55 + 0.1 * rnd());
-        addSeg(0, hy0, 0, hy0 * (0.6 + 0.8 * rnd()));
+        addSeg(-0.4, hy0, -0.4, hy0 * (0.6 + 0.8 * rnd()));
         if (ta > hy1 + 0.02 && tb > hy1 + 0.02) addSeg(hy1, ta, hy1 * 1.05, tb);
       }
     }
@@ -1654,6 +1657,7 @@ uniform vec3 uSunColor;
 uniform float uVis;
 uniform float uWinScale;
 uniform float uHS;
+uniform float uSink;
 uniform float uNight;
 uniform vec2 uPitch[12];
 varying vec3 vLight;
@@ -1674,18 +1678,22 @@ void main() {
   mat3 Rn = mat3(R[0] / sc.x, R[1] / sc.y, R[2] / sc.z);
   vec3 n = normalize(Rn * (normal / sc));
   float seed = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);
-  vec3 sc2 = vec3(sc.x, max(1e-5, sc.y / uHS), sc.z);
+  float hv = max(1e-5, sc.y - uSink);
   vec3 loc = position;
+  float ym = position.y;
   float fl = aAnc.w;
   bool hide = false;
-  if (fl > 0.5) {
+  if (fl > 0.5 && fl < 7.5) {
     float ax = mod(fl, 2.0) > 0.5 ? 1.0 : 0.0;
     float ay = mod(floor(fl / 2.0), 2.0) > 0.5 ? 1.0 : 0.0;
     float az = fl > 3.5 ? 1.0 : 0.0;
-    loc = mix(position, aAnc.xyz + position / sc2, vec3(ax, ay, az));
-    float yy = aAnc.y + aDet.w / sc2.y;
+    loc.x = ax > 0.5 ? aAnc.x + position.x / sc.x : position.x;
+    loc.z = az > 0.5 ? aAnc.z + position.z / sc.z : position.z;
+    ym = ay > 0.5 ? aAnc.y + position.y * uHS / hv : position.y;
+    float yy = aAnc.y + aDet.w * 0.001 * uHS / hv;
     if (yy > aDet.z) hide = true;
   }
+  loc.y = fl > 7.5 ? ym : (uSink + ym * hv) / sc.y;
   if (aDet.y != 0.0) {
     float rr = fract(seed * (13.37 + aDet.x * 7.1) + aDet.x * 0.6180339);
     bool show = aDet.y > 0.0 ? rr < aDet.y : rr >= -aDet.y;
@@ -1699,7 +1707,7 @@ void main() {
   float fi = max(aSurf.x, 0.0);
   vec2 pf = uPitch[int(fi + 0.5)];
   float faceW = (aSurf.y < 0.5 ? sc.x : sc.z) * aSize.x;
-  float faceH = sc.y * aSize.y;
+  float faceH = (fl > 7.5 ? sc.y : hv) * aSize.y;
   vCell = uv * vec2(max(1.0, floor(faceW / (pf.x * uWinScale) + 0.5)), max(1.0, floor(faceH / (pf.y * uHS * uWinScale) + 0.5)));
   vSurf = aSurf;
   vWall = instanceColor;
@@ -1708,9 +1716,10 @@ void main() {
   vVC = aVC;
   vSeed = seed;
   vNy = n.y;
-  vAO = mix(0.7, 1.0, smoothstep(0.0, 0.14, loc.y));
-  vM = vec3(loc.x * sc.x, loc.y * sc2.y, loc.z * sc.z) * 1000.0;
-  vUM = vec2(aSurf.y < 0.5 ? loc.x * sc.x : loc.z * sc.z, loc.y * sc2.y) * 1000.0;
+  vAO = mix(0.7, 1.0, smoothstep(0.0, 0.14, ym));
+  float ymM = ym * hv * 1000.0 / uHS;
+  vM = vec3(loc.x * sc.x * 1000.0, ymM, loc.z * sc.z * 1000.0);
+  vUM = vec2(aSurf.y < 0.5 ? loc.x * sc.x * 1000.0 : loc.z * sc.z * 1000.0, ymM);
   vec4 mvPosition = viewMatrix * wp;
   gl_Position = projectionMatrix * mvPosition;
   if (hide) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -1818,10 +1827,11 @@ void main() {
       tex = base * t.rgb;
       // Fachwerk
       if (style > 0.5 && style < 1.5) {
-        vec2 q = vec2(vUM.x / 1.8, vUM.y / 3.4);
-        float bx = step(fract(q.x), 0.07), by = step(fract(q.y), 0.06);
-        float br = step(abs(fract(q.x) - fract(q.y)), 0.05) * step(0.2, fract(q.y));
-        tex = mix(tex, vec3(0.10, 0.065, 0.04), max(max(bx, by), br) * 0.85);
+        vec2 q = vec2(vUM.x / 2.6, vUM.y / 3.4);
+        float tf = 1.0 - smoothstep(0.12, 0.3, fwidth(vUM.x) / 2.6);
+        float bx = step(fract(q.x), 0.1), by = step(fract(q.y), 0.07);
+        float br = step(abs(fract(q.x) - fract(q.y)), 0.07) * step(0.2, fract(q.y));
+        tex = mix(tex, vec3(0.10, 0.065, 0.04), max(max(bx, by), br) * 0.85 * tf);
       }
       // Rußspuren über Fenstern
       if (broken > 0.5 && hash21(cid + 11.0) < 0.55) tex *= 1.0 - 0.6 * smoothstep(0.25, 1.0, fract(vCell.y));
@@ -1836,13 +1846,14 @@ void main() {
       vec3 lc = mix(vec3(1.0, 0.78, 0.42), vec3(0.8, 0.9, 1.0), step(0.85, hash21(cid + 2.2)));
       emis = lc * lit * uNight * 1.3;
     }
-    if (heavy > 0.5) col *= 0.5;
+    if (heavy > 0.5) col *= 0.62;
     else if (broken > 0.5) col *= 0.92;
   } else if (part < 0.5 && st < 0.5 && style > 0.5 && style < 1.5) {
     // Fachwerk auf fensterlosen Wandflächen
-    vec2 q = vec2(vUM.x / 1.8, vUM.y / 3.4);
-    float bx = step(fract(q.x), 0.07), by = step(fract(q.y), 0.06);
-    col = mix(col, vec3(0.10, 0.065, 0.04), max(bx, by) * 0.85);
+    vec2 q = vec2(vUM.x / 2.6, vUM.y / 3.4);
+    float tf = 1.0 - smoothstep(0.12, 0.3, fwidth(vUM.x) / 2.6);
+    float bx = step(fract(q.x), 0.1), by = step(fract(q.y), 0.07);
+    col = mix(col, vec3(0.10, 0.065, 0.04), max(bx, by) * 0.85 * tf);
   }
   // Dach: Ziegelkörnung, fehlende Ziegel bei Schäden
   if (part > 0.5 && part < 1.5) {
@@ -1872,7 +1883,6 @@ void main() {
     float ember = step(0.965, hh) * step(0.55, hash21(floor(vM.xz * 2.2 + vM.y * 4.0) + floor(uTime * 2.0)));
     emis += vec3(1.0, 0.36, 0.06) * ember * (0.5 + 0.8 * uNight);
   }
-  if (heavy > 0.5 && part > 4.5) col *= 0.7 + 0.3 * hash21(floor(vM.xz + vM.y));
   col *= vAO;
   gl_FragColor = vec4(col * vLight + emis, 1.0);
   #include <fog_fragment>
@@ -1905,6 +1915,7 @@ export function getBuildingMaterial(): BuildingMaterial {
       uVis: { value: 1 },
       uWinScale: { value: 1 },
       uHS: { value: 2.25 },
+      uSink: { value: SINK },
       uNight: { value: 0 },
       uTime: { value: 0 },
     },
