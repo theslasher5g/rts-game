@@ -370,7 +370,7 @@ function buildAtlas(): { tex: THREE.DataTexture; avg: THREE.Vector4[] } {
   rect(2, 8, 6, 9, 14, 230, 230, 230, 0);
   // 3 Glasfassade (Büro)
   wall(3, 90);
-  rect(3, 0, 3, W, ATLAS_T, 24, 38, 46, 255);
+  rect(3, 0, 3, W, ATLAS_T, 52, 84, 100, 255);
   rect(3, 0, 3, 1, ATLAS_T, 70, 70, 70, 0);
   rect(3, 8, 3, 9, ATLAS_T, 70, 70, 70, 0);
   // 4 Industrie: Wellblech + Fensterband
@@ -391,7 +391,7 @@ function buildAtlas(): { tex: THREE.DataTexture; avg: THREE.Vector4[] } {
   rect(6, 8, 5, 9, 12, 240, 240, 240, 0);
   // 7 Turm: durchgehendes Glas
   wall(7, 80);
-  rect(7, 0, 1, W, ATLAS_T, 34, 54, 66, 255);
+  rect(7, 0, 1, W, ATLAS_T, 70, 108, 126, 255);
   rect(7, 0, 1, 1, ATLAS_T, 60, 60, 60, 0);
   rect(7, 8, 1, 9, ATLAS_T, 60, 60, 60, 0);
   const avg: THREE.Vector4[] = [];
@@ -446,7 +446,7 @@ void main() {
   vec4 wp = instanceMatrix * vec4(lp, 1.0);
   vec3 amb = mix(vec3(0.24, 0.21, 0.17), vec3(0.50, 0.56, 0.66), n.y * 0.5 + 0.5) * 0.62;
   float ndl = max(dot(n, uSunDir), 0.0);
-  vLight = (amb + uSunColor * ndl * 0.95) * (1.0 - 0.55 * uNight);
+  vLight = (amb + uSunColor * ndl * 0.95) * 1.12 * (1.0 - 0.55 * uNight);
   float fi = max(aSurf.x, 0.0);
   vec2 pf = uPitch[int(fi + 0.5)];
   float faceW = (aSurf.y < 0.5 ? sc.x : sc.z) * aSize.x;
@@ -899,14 +899,14 @@ const NORDIC = new Set(['NOR', 'SWE', 'FIN', 'DNK', 'ISL']);
 const WALL_WEST = [0xd6cdb4, 0xcbbf9f, 0xb9b09a, 0xc9a98a, 0xc4b79a, 0xa89f8c, 0xbfa891, 0xd2c6a4, 0x9a6a55, 0x8c5e4a, 0xb08468];
 const WALL_MED = [0xe0cfa8, 0xd8b98a, 0xcfa77a, 0xe6dcc0, 0xc79a6c, 0xd9c7a3, 0xe9e2d0];
 const WALL_NORDIC = [0xa14a3a, 0xd9b25a, 0xe8e4d8, 0x7d95a3, 0xb8573f, 0xc9c0a0];
-const WALL_PLATTE = [0xb4b0a4, 0xa9a79c, 0x9c9b93, 0xc0b9a4, 0xb7c2b4, 0xc6b7a2, 0xa8b0b4];
-const WALL_MODERN = [0x9aa6ae, 0x8b99a3, 0x7f8f98, 0xa8b3b6, 0x8a949c];
-const WALL_IND = [0x8d8f8c, 0x77808a, 0x9a8e7a, 0x6e7a72, 0xa09d93];
-const ROOF_WEST = [0x8a4a38, 0x7a4232, 0x93503c, 0x6a4a3a, 0x5a4034, 0x4a4d54, 0x3e424a, 0x5a5d62];
-const ROOF_MED = [0xb0583a, 0xa44c32, 0xbf6a46, 0xb86a48];
-const ROOF_NORDIC = [0x3d3b3c, 0x4a3a34, 0x6a3a30, 0x4a4d54];
-const ROOF_FLAT = [0x5d5d5b, 0x4f4f50, 0x6a6862, 0x55575a];
-const ROOF_IND = [0x5a5e60, 0x6b5646, 0x707478, 0x4f5558];
+const WALL_PLATTE = [0xd0ccbf, 0xc4c2b6, 0xb8b7ae, 0xd8d0b8, 0xc4d2c0, 0xdccbb4, 0xbac4c8];
+const WALL_MODERN = [0xc0ccd4, 0xb0bec8, 0xa4b6c0, 0xcdd6d8, 0xb4bec6];
+const WALL_IND = [0xb0b2ae, 0x9aa4b0, 0xbfb29a, 0x93a39a, 0xc4c0b4];
+const ROOF_WEST = [0xb8644a, 0xa65a42, 0xc06c50, 0x8a6048, 0x7a5a48, 0x6e727c, 0x5c6068, 0x7c7f86];
+const ROOF_MED = [0xc8683f, 0xbc5e3a, 0xd47a50, 0xc9754f];
+const ROOF_NORDIC = [0x5a5758, 0x6a524a, 0x8a4a3c, 0x62666e];
+const ROOF_FLAT = [0x8a8884, 0x7a7a7c, 0x9a978f, 0x808286];
+const ROOF_IND = [0x80868a, 0x8c6c58, 0x959a9e, 0x6e757a];
 
 function pick(a: number[], r: number): number {
   return a[Math.min(a.length - 1, Math.floor(r * a.length))];
@@ -1067,10 +1067,12 @@ export class Cities {
     const towerTarget = hi ? Math.min(26, Math.round(popM * 2.6) + 3) : 0;
     const maxChurch = Math.min(7, 1 + Math.floor(popM * 2));
     let churches = 0, towers = 0;
+    let ou = 0, ov = 0;
     const ca = Math.cos(theta), sa = Math.sin(theta);
     // a-Achse = lokale x-Achse der Gebäude (rot = theta), b-Achse = lokale z-Achse
     const emit = (a: number, b: number, w: number, h: number, d: number, rotLocal: number, type: number, wall: number, roof: number, jitter = 0): void => {
       const rj = jitter ? (rnd() - 0.5) * jitter : 0;
+      a += ou; b += ov;
       this.add(cx + a * ca + b * sa, cz - a * sa + b * ca, w, h, d, theta + rotLocal + rj, type, wall, roof);
     };
 
@@ -1091,9 +1093,10 @@ export class Cities {
     for (const cell of cells) {
       if (n >= cap) break;
       const { i, j, f } = cell;
-      const pFill = Math.max(0.12, Math.min(0.97, 1.02 - 0.85 * Math.pow(f, 1.4)));
+      const pFill = Math.max(0.3, Math.min(1, 1.12 - 0.72 * Math.pow(f, 2.2)));
       if (rnd() > pFill) continue;
       const u0 = (i + 0.5) * S + (rnd() - 0.5) * 0.02, v0 = (j + 0.5) * S + (rnd() - 0.5) * 0.02;
+      ou = u0; ov = v0;
       const wx = cx + u0 * ca + v0 * sa, wz = cz - u0 * sa + v0 * ca;
       if (!this.landOk(wx, wz)) continue;
       const ang = Math.atan2(v0, u0) + Math.PI;

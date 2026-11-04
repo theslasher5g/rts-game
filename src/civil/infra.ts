@@ -3,11 +3,9 @@ import type { CityMeta } from '../core/types';
 import { WATER_LAKE, WATER_RIVER } from '../core/types';
 import type { InfraInfo, InfraKind } from './types';
 
-/** Stadtradius (km) – MUSS der Bebauungslogik in src/world/Cities.ts entsprechen (generateCity). */
-export function cityRadiusKm(pop: number, capital: boolean): number {
-  const popM = Math.max(0.02, pop / 1e6);
-  return Math.min(15, 1.5 + Math.sqrt(popM) * 3.2 + (capital ? 0.6 : 0));
-}
+/** Stadtradius (km) – identisch zur Bebauung in src/world/Cities.ts */
+export { cityRadiusKm } from '../world/Cities';
+import { cityRadiusKm } from '../world/Cities';
 
 /** Deterministischer RNG (mulberry32, Seed aus String) */
 export function rngFrom(name: string): () => number {

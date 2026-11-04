@@ -42,17 +42,17 @@ function gear(b: ModelBuilder, g: GearOpts): void {
   }
   // Leitrad vorn, Treibrad hinten (größer, mit Zähnen angedeutet)
   b.lathe([[0.42, -g.wheelW / 2], [0.42, g.wheelW / 2], [0, g.wheelW / 2 + 0.08]], 'x', g.x + g.beltW / 2 - 0.08, 0.5, zF + 0.3, RUBBER, { paint: P_FIXED, seg: 7, edgeColors: [RUBBER, HUB], ao: 0.1 });
-  b.lathe([[rS, -g.wheelW / 2], [rS, g.wheelW / 2], [rS * 0.55, g.wheelW / 2 + 0.05], [0, g.wheelW / 2 + 0.1]], 'x', g.x + g.beltW / 2 - 0.08, 0.58, zR - 0.15, 0x3a3a34, { paint: P_FIXED, seg: 8, edgeColors: [0x3a3a34, HUB, 0x6a6a60], ao: 0.1 });
+  b.lathe([[rS, -g.wheelW / 2], [rS, g.wheelW / 2], [0, g.wheelW / 2 + 0.1]], 'x', g.x + g.beltW / 2 - 0.08, 0.58, zR - 0.15, 0x3a3a34, { paint: P_FIXED, seg: 8, edgeColors: [0x3a3a34, HUB], ao: 0.1 });
   // Stützrollen
   for (let i = 0; i < g.rollers; i++) {
     const z = zF + 1.3 + ((zR - zF - 2.6) * i) / Math.max(1, g.rollers - 1);
-    b.cyl(0.14, 0.16, g.x + g.beltW / 2 - 0.05, g.beltTop - 0.12, z, 'x', RUBBER, { paint: P_FIXED }, 5);
+    b.lathe([[0.14, -0.08], [0.14, 0.08], [0, 0.08]], 'x', g.x + g.beltW / 2 - 0.05, g.beltTop - 0.12, z, RUBBER, { paint: P_FIXED, seg: 5 });
   }
   if (g.skirt) {
     const s = g.skirt;
     const xs = g.x + g.beltW / 2 + 0.12;
     const L = s.z1 - s.z0;
-    const n = Math.max(2, Math.round(L / 1.1));
+    const n = Math.max(2, Math.round(L / 1.9));
     // Schürzenplatten (leicht versetzt = sichtbare Fugen)
     for (let i = 0; i < n; i++) {
       const pl = L / n;
@@ -66,12 +66,8 @@ function gear(b: ModelBuilder, g: GearOpts): void {
 
 /** Kommandanten-/Ladeschützenluke mit MG */
 function cupola(b: ModelBuilder, x: number, y: number, z: number, r: number, mg: boolean, big = false): void {
-  b.lathe([[0, 0], [r, 0], [r * 0.95, 0.2], [r * 0.7, 0.26], [0, 0.26]], 'y', x, y, z, HULL, { seg: 8, ao: 0.15 });
-  const n = big ? 8 : 6;
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    b.box(r * 0.36, 0.1, r * 0.28, x + Math.cos(a) * r * 0.98, y + 0.16, z + Math.sin(a) * r * 0.98, GLASS, { paint: P_FIXED, rot: [0, -a + Math.PI / 2, 0], ao: 0 });
-  }
+  b.lathe([[r, 0], [r * 0.92, 0.24], [0, 0.27]], 'y', x, y, z, HULL, { seg: big ? 8 : 6, ao: 0.15 });
+  b.lathe([[r * 1.02, 0.1], [r * 1.0, 0.2]], 'y', x, y, z, GLASS, { seg: big ? 8 : 6, paint: P_FIXED, ao: 0, both: true });
   if (mg) {
     b.box(0.12, 0.14, 0.4, x + 0.02, y + 0.36, z - 0.05, DARK, { paint: P_FIXED });
     b.barrel(0.035, 0.75, x + 0.02, y + 0.38, z - 0.1, 0.05, DARK, 4);
@@ -81,7 +77,6 @@ function cupola(b: ModelBuilder, x: number, y: number, z: number, r: number, mg:
 function smokeRack(b: ModelBuilder, x: number, y: number, z: number): void {
   b.box(0.34, 0.3, 0.24, x, y, z, HULL_DARK, { rot: [0, 0, 0], ao: 0.1 });
   b.box(0.3, 0.26, 0.04, x, y, z - 0.13, BLACK, { paint: P_FIXED, ao: 0 });
-  b.box(0.3, 0.04, 0.2, x, y + 0.16, z - 0.02, 0x8a8a80, { paint: P_FIXED, ao: 0 });
 }
 
 /** Kanone: Pivot lokal, entlang −z */
@@ -155,7 +150,7 @@ function turret(b: ModelBuilder, style: TankStyle, heavy: boolean): void {
     // Leopard-2-artig: kantig, flache Dachpartie, Keilpanzerung
     b.lathe([[0, 0], [1.35, 0], [1.4, 0.18], [0, 0.18]], 'y', 0, 1.55, -0.2, HULL_DARK, { seg: 10, ao: 0.1 });
     b.extrudeX([[-2.0, 1.7], [-1.55, 2.45], [1.0, 2.5], [1.7, 2.35], [1.9, 2.0], [1.9, 1.7]], 2.5, 0, 0, 0, HULL, { camo: 0.8, taper: [1, 0.84] });
-    b.mirror((s) => {
+    b.mirror(() => {
       b.extrudeX([[-2.35, 1.8], [-1.6, 2.35], [-0.6, 2.35], [-0.6, 1.8]], 0.55, 1.45, 0, 0, HULL_LIGHT, { camo: 0.8, taper: [1, 0.7] });
       b.extrudeX([[-0.2, 1.8], [1.6, 1.8], [1.6, 2.25], [-0.2, 2.3]], 0.28, 1.4, 0, 0.2, HULL, { camo: 0.8 });
     });

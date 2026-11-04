@@ -12,6 +12,7 @@ import type { Unit } from '../units/types';
 import type { BuildingInfo } from '../combat/types';
 import type { CasualtyCause, CivilCity, InfraInfo, InfraKind } from './types';
 import { generateInfra, cityRadiusKm, rngFrom } from './infra';
+import { terrainHeightKm } from '../world/Cities';
 import { buildCivilGeometries, BUS_COLORS, CAR_COLORS, CLOTH_COLORS, INFRA_HEIGHT_M, INFRA_KINDS, TRUCK_COLORS, type VehicleModel } from './CivilModels';
 
 /** Wegfindung (strukturell = Pathfinder) */
@@ -356,7 +357,6 @@ export class CivilianSystem {
   private readonly bldCity = new Map<number, number>();
   private readonly bldIntegrity = new Map<number, number>();
   private readonly infraDamageEmit: number[];
-  private readonly _bi: BuildingInfo[] = [];
   private readonly _ui: Unit[] = [];
 
   // Flüsse
@@ -397,8 +397,6 @@ export class CivilianSystem {
   private readonly truckCol: THREE.Color[] = TRUCK_COLORS.map((c) => new THREE.Color(c));
   private readonly clothCol: THREE.Color[] = CLOTH_COLORS.map((c) => new THREE.Color(c));
   private readonly white = new THREE.Color(1, 1, 1);
-  private infraDirty = true;
-  private lastInfraScale = 0;
   private edgeCum = new Map<number, Float32Array>();
   private ambient: Array<{ e: number; n: number; speed: number; rail: boolean }> = [];
   private ambientTimer = 99;
@@ -450,7 +448,7 @@ export class CivilianSystem {
       this.infraByCity[it.cityId].push(i);
       const h = Math.max(it.w, it.d) * 0.5;
       this.infraBase[i] = Math.max(0, Math.min(
-        this.geo.heightAt(it.x - h, it.z - h), this.geo.heightAt(it.x + h, it.z - h), this.geo.heightAt(it.x - h, it.z + h), this.geo.heightAt(it.x + h, it.z + h), this.geo.heightAt(it.x, it.z)));
+        terrainHeightKm(this.geo, it.x - h, it.z - h), terrainHeightKm(this.geo, it.x + h, it.z - h), terrainHeightKm(this.geo, it.x - h, it.z + h), terrainHeightKm(this.geo, it.x + h, it.z + h), terrainHeightKm(this.geo, it.x, it.z)));
     });
 
     // --- Meshes
@@ -610,7 +608,6 @@ export class CivilianSystem {
     if (!it || amount <= 0 || it.integrity <= 0) return;
     const before = it.integrity;
     it.integrity = Math.max(0, before - amount);
-    this.infraDirty = true;
     const destroyed = it.integrity <= 0;
     if (destroyed || Math.floor(it.integrity * 10) < Math.floor(this.infraDamageEmit[id] * 10)) {
       this.infraDamageEmit[id] = it.integrity;
@@ -705,7 +702,6 @@ export class CivilianSystem {
     this.exag = s.heightExaggeration;
     this.show = s.showCities;
     this.object.visible = s.showCities;
-    this.infraDirty = true;
   }
 
   // ================================================================== Ereignisse
@@ -787,7 +783,7 @@ export class CivilianSystem {
     const f = densityProfile(d / R);
     const rho = (c.population / (Math.PI * R * R)) * 0.6;
     const rEff = Math.max(0.004, r * 1.25);
-    const mean = rho * f * Math.PI * rEff * rEff * 0.12 * weight;
+    const mean = rho * f * Math.PI * rEff * rEff * 0.06 * weight;
     // Beschuss-Zähler (Flächenbeschuss)
     cx.impacts.push(this.clock);
     while (cx.impacts.length && this.clock - cx.impacts[0] > BOMBARD_WINDOW_S) cx.impacts.shift();

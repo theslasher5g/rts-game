@@ -224,8 +224,8 @@ export class ModelBuilder {
         const [q0, q1, q2, q3] = face.map((i) => P[i]);
         const e1 = sub(q1, q0), e2 = sub(q3, q0);
         const l1 = Math.hypot(...e1), l2 = Math.hypot(...e2);
-        const nu = Math.min(10, Math.max(1, Math.round(l1 / camoCell))), nv = Math.min(10, Math.max(1, Math.round(l2 / camoCell)));
-        if (nu * nv > 1) {
+        const nu = Math.min(6, Math.max(1, Math.round(l1 / camoCell))), nv = Math.min(4, Math.max(1, Math.round(l2 / camoCell)));
+        if (nu * nv > 1 && l1 * l2 > 0.7) {
           const pt = (u: number, v: number): V3 => [
             q0[0] + e1[0] * u + e2[0] * v + (q0[0] - q1[0] + q2[0] - q3[0]) * u * v,
             q0[1] + e1[1] * u + e2[1] * v + (q0[1] - q1[1] + q2[1] - q3[1]) * u * v,

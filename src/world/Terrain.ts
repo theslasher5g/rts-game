@@ -74,29 +74,40 @@ export function getCountryTexture(geo: GeoData): THREE.DataTexture {
   return tex;
 }
 
+let noiseDataCache: Uint8Array | null = null;
+const NOISE_S = 64;
+/** 64x64-Rauschdaten (deterministisch; gemeinsam für GPU-Textur und CPU-Abfragen wie forestMask). */
+function getNoiseData(): Uint8Array {
+  if (noiseDataCache) return noiseDataCache;
+  const S = NOISE_S;
+  let seed = 1337;
+  const rnd = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const white = new Float32Array(S * S);
+  for (let k = 0; k < S * S; k++) white[k] = rnd();
+  // Zwei Oktaven: geglättetes Grundrauschen + feines weißes Rauschen
+  const data = new Uint8Array(S * S);
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      let sum = 0;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) sum += white[((y + dy + S) % S) * S + ((x + dx + S) % S)];
+      const v = (sum / 9 - 0.5) * 2.2 + 0.5; // Kontrast wieder anheben
+      const m = v * 0.65 + white[y * S + x] * 0.35;
+      data[y * S + x] = Math.max(0, Math.min(255, Math.round(m * 255)));
+    }
+  }
+  noiseDataCache = data;
+  return data;
+}
+
 /** 64x64-Rauschtextur (R8, wiederholend) – nearest- und linear-gefilterte Variante mit denselben Daten. */
 export function getNoiseTextures(): { nearest: THREE.DataTexture; linear: THREE.DataTexture } {
   if (!noiseNearest || !noiseLinear) {
-    const S = 64;
-    let seed = 1337;
-    const rnd = () => {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      return seed / 4294967296;
-    };
-    const white = new Float32Array(S * S);
-    for (let k = 0; k < S * S; k++) white[k] = rnd();
-    // Zwei Oktaven: geglättetes Grundrauschen + feines weißes Rauschen
-    const data = new Uint8Array(S * S);
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        let sum = 0;
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) sum += white[((y + dy + S) % S) * S + ((x + dx + S) % S)];
-        const v = (sum / 9 - 0.5) * 2.2 + 0.5; // Kontrast wieder anheben
-        const m = v * 0.65 + white[y * S + x] * 0.35;
-        data[y * S + x] = Math.max(0, Math.min(255, Math.round(m * 255)));
-      }
-    }
+    const S = NOISE_S;
+    const data = getNoiseData();
     const make = (filter: THREE.MagnificationTextureFilter) => {
       const t = new THREE.DataTexture(data, S, S, THREE.RedFormat, THREE.UnsignedByteType);
       t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -112,6 +123,50 @@ export function getNoiseTextures(): { nearest: THREE.DataTexture; linear: THREE.
     noiseLinear = make(THREE.LinearFilter);
   }
   return { nearest: noiseNearest, linear: noiseLinear };
+}
+
+/** Bilineares Rauschen wie texture2D(uNoiseL, uv/64) im Shader (u,v = Weltkoordinate / Skalierung). */
+function noiseLinearAt(u: number, v: number): number {
+  const d = getNoiseData(), S = NOISE_S;
+  const x = u - 0.5, y = v - 0.5;
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const fx = x - x0, fy = y - y0;
+  const ix0 = ((x0 % S) + S) % S, ix1 = (ix0 + 1) % S;
+  const iy0 = ((y0 % S) + S) % S, iy1 = (iy0 + 1) % S;
+  const a = d[iy0 * S + ix0], b = d[iy0 * S + ix1], c = d[iy1 * S + ix0], e = d[iy1 * S + ix1];
+  return ((a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + e * fx) * fy) / 255;
+}
+
+function smoothstepJs(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Waldanteil 0..1 an einer Weltposition – exakte CPU-Entsprechung der `forest`-Variable im Terrain-Fragment-Shader
+ * (Biom-Rauschen nBig/nHuge, Breitengrad, Trockenheit, Höhenband). Die Baumschicht (Vegetation) nutzt dieselbe Funktion,
+ * damit Geländeton und Bäume übereinstimmen.
+ */
+export function forestMask(geo: GeoData, x: number, z: number): number {
+  const mapX = geo.width * geo.cellKm, mapZ = geo.height * geo.cellKm;
+  const lat = Math.max(0, Math.min(1, z / mapZ));
+  const lon = Math.max(0, Math.min(1, x / mapX));
+  const nBig = noiseLinearAt(x / 45, z / 45);
+  const nHuge = noiseLinearAt(x / 260 + 17, z / 260 + 17);
+  const dry = Math.max(0, Math.min(1, smoothstepJs(0.76, 0.9, lat + (nHuge - 0.5) * 0.08) + smoothstepJs(0.58, 0.78, lat) * smoothstepJs(0.72, 0.92, lon) * 0.8));
+  let f = smoothstepJs(0.5, 0.66, nHuge * 0.6 + nBig * 0.4 + (0.3 - lat) * 0.5) * (1 - dry);
+  const hk = geo.heightAt(x, z);
+  f = Math.max(f, smoothstepJs(0.35, 0.8, hk) * (1 - smoothstepJs(1.2, 1.7, hk)) * 0.75 * (1 - dry));
+  return f;
+}
+
+/** Trockenheit 0..1 (wie `dry` im Shader) */
+export function dryMask(geo: GeoData, x: number, z: number): number {
+  const mapX = geo.width * geo.cellKm, mapZ = geo.height * geo.cellKm;
+  const lat = Math.max(0, Math.min(1, z / mapZ));
+  const lon = Math.max(0, Math.min(1, x / mapX));
+  const nHuge = noiseLinearAt(x / 260 + 17, z / 260 + 17);
+  return Math.max(0, Math.min(1, smoothstepJs(0.76, 0.9, lat + (nHuge - 0.5) * 0.08) + smoothstepJs(0.58, 0.78, lat) * smoothstepJs(0.72, 0.92, lon) * 0.8));
 }
 
 /** Gedämpfte Länderfarben (sRGB) für Natural-Earth MAPCOLOR9 1..9 */
@@ -256,6 +311,11 @@ varying float vHeightKm;
 varying float vSlope;
 
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
+float hash21(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 float lumOf(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
 int idAt(vec2 p) {
@@ -309,7 +369,7 @@ void main() {
   // --- Biome (sRGB-Definitionen -> linear)
   vec3 cGrass  = srgb(vec3(0.46, 0.52, 0.30));
   vec3 cFarm   = srgb(vec3(0.60, 0.58, 0.38));
-  vec3 cForest = srgb(vec3(0.23, 0.32, 0.19));
+  vec3 cForest = srgb(vec3(0.19, 0.28, 0.15));
   vec3 cDry    = srgb(vec3(0.63, 0.58, 0.41));
   vec3 cDesert = srgb(vec3(0.77, 0.66, 0.47));
   vec3 cTundra = srgb(vec3(0.52, 0.52, 0.44));
@@ -326,6 +386,7 @@ void main() {
   float forest = smoothstep(0.5, 0.66, nHuge * 0.6 + nBig * 0.4 + (0.3 - lat) * 0.5) * (1.0 - dry);
   forest = max(forest, smoothstep(0.35, 0.8, hk) * (1.0 - smoothstep(1.2, 1.7, hk)) * 0.75 * (1.0 - dry));
   col = mix(col, cForest, forest);
+  col *= 1.0 - forest * 0.16 * (1.0 - noiseN(wxz / 0.11));   // Kronen-Sprenkel passend zur Baumschicht
   col = mix(col, mix(cDry, cDesert, smoothstep(0.85, 0.97, lat)), dry);
   col = mix(col, cTundra, smoothstep(0.12, 0.03, lat) * 0.8);
   // Küste: Sand
@@ -342,6 +403,45 @@ void main() {
   float snowLine = mix(0.7, 2.45, smoothstep(0.04, 0.75, lat)) + (nMid - 0.5) * 0.35;
   float snow = smoothstep(snowLine - 0.12, snowLine + 0.12, hk) * (1.0 - 0.5 * smoothstep(0.35, 0.6, vSlope));
   col = mix(col, cSnow, snow);
+  // --- Nahdetail (blendet ab ~40 km Kameraabstand ein, ab ~150 km vollständig aus; keine Schleifen, keine Texturen)
+  float dtl = 1.0 - smoothstep(40.0, 150.0, vFogDepth);
+  if (dtl > 0.001) {
+    float lowland = 1.0 - smoothstep(0.25, 0.6, hk);
+    float flatness = 1.0 - smoothstep(0.03, 0.09, vSlope);
+    // Feldparzellen (gedrehtes Raster 0.42 km): Kulturfarben, Furchen, Hecken an den Rändern
+    vec2 fq = vec2(wxz.x * 0.9553 + wxz.y * 0.2955, -wxz.x * 0.2955 + wxz.y * 0.9553);
+    vec2 pq = fq / 0.42;
+    vec2 pc = floor(pq);
+    vec2 pf = fract(pq);
+    float ph = hash21(pc);
+    float ph2 = hash21(pc + 7.3);
+    float farmish = (0.3 + 0.7 * smoothstep(0.4, 0.6, nBig)) * lowland * flatness * (1.0 - forest) * (1.0 - dry);
+    vec3 crop = ph < 0.25 ? srgb(vec3(0.72, 0.64, 0.33)) : (ph < 0.5 ? srgb(vec3(0.38, 0.5, 0.22)) : (ph < 0.7 ? srgb(vec3(0.46, 0.34, 0.22)) : (ph < 0.88 ? srgb(vec3(0.58, 0.58, 0.36)) : srgb(vec3(0.3, 0.42, 0.2)))));
+    vec2 fwq = fwidth(fq);
+    float fa = max(fwq.x, fwq.y);
+    float st = ph2 < 0.5 ? fq.x : fq.y;
+    float stripe = mix(0.5 + 0.5 * sin(st * 6.2832 / 0.011), 0.5, smoothstep(0.004, 0.012, fa));
+    crop *= 0.84 + 0.3 * stripe;
+    float edgeKm = min(min(pf.x, 1.0 - pf.x), min(pf.y, 1.0 - pf.y)) * 0.42;
+    float hedge = 1.0 - smoothstep(0.003, 0.007 + fa, edgeKm);
+    vec3 fieldCol = mix(crop, srgb(vec3(0.2, 0.3, 0.14)), hedge * 0.8);
+    col = mix(col, fieldCol, farmish * dtl * 0.8);
+    // Gras-/Erdvariation
+    float n1 = noiseN(wxz / 0.02 + 7.0);
+    float n2 = noiseL(wxz / 0.15 + 3.0);
+    col *= 1.0 + dtl * (0.14 * (n2 - 0.5) + 0.1 * (n1 - 0.5));
+    float dirt = smoothstep(0.7, 0.9, noiseL(wxz / 0.6 + 11.0)) * (1.0 - forest) * (1.0 - snow);
+    col = mix(col, srgb(vec3(0.42, 0.34, 0.24)), dtl * dirt * 0.35);
+    // Felsschichtung an Hängen
+    float strata = 0.5 + 0.5 * sin(hk * 220.0 + nMid * 5.0);
+    col *= mix(1.0, 0.82 + 0.3 * strata, rock * dtl);
+    // Getrockneter Schlamm (Süden): Risse entlang von Rauschkonturen
+    float crack = 1.0 - smoothstep(0.0, 0.03 + 0.2 * fa, abs(noiseL(wxz / 0.35 + 5.0) - 0.5));
+    col *= 1.0 - 0.24 * crack * dry * dtl;
+    // Strand: feuchter Sand nahe der Wasserlinie
+    float wet = nearSea * (1.0 - smoothstep(0.0, 0.012, hk));
+    col *= 1.0 - 0.2 * wet * dtl;
+  }
   // Meeresboden (unter der Wasserfläche)
   if (hk < 0.0 && id == 0) col = mix(cSand, cFloor, smoothstep(0.0, 0.04, -hk));
   // Seen / Flüsse

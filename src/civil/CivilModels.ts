@@ -15,8 +15,6 @@ const RIM = 0x8d9095;
 const DARK = 0x2e2f33;
 const LIGHT_Y = 0xf0e6b0;
 const LIGHT_R = 0xc03a30;
-const CONCRETE = 0xa7a49c;
-const CONCRETE_D = 0x7f7c75;
 
 type V3 = [number, number, number];
 

@@ -112,6 +112,14 @@ const DEFS: Record<string, Def> = {
   supply_truck: def('Versorgungs-LKW', 'Vers', 'support', 'truck', 4, MOB.truck(85, 18), 0.15,
     { armor: 5, hp: 100, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 0, fuelKm: 1000, cost: 3 }),
 
+  // --- Humanitär / Sanität (unbewaffnet)
+  aid_convoy: def('Hilfskonvoi', 'Hilfe', 'support', 'aid_truck', 4, MOB.truck(80, 12), 0.15,
+    { armor: 3, hp: 120, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 10, fuelKm: 1000, cost: 2 }),
+  field_hospital: def('Feldlazarett', 'Lazarett', 'support', 'field_hospital', 1, MOB.truck(70, 10), 0.2,
+    { armor: 5, hp: 200, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 0, fuelKm: 800, cost: 6 }),
+  ambulance: def('Krankenwagen', 'KTW', 'support', 'ambulance', 2, MOB.wheeled(100, 25), 0.1,
+    { armor: 3, hp: 70, damage: 0, rangeKm: 0, sightKm: 1.5, ammo: 0, fuelKm: 700, cost: 1 }),
+
   // --- Hubschrauber
   attack_heli: def('Kampfhubschrauber', 'KpfHS', 'helicopter', 'heli_attack', 2, MOB.air(270), 0.3,
     { armor: 20, hp: 160, damage: 70, rangeKm: 8, sightKm: 10, ammo: 16, fuelKm: 550, cost: 120 }),

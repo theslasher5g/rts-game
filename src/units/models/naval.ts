@@ -15,7 +15,7 @@ const scaleXZ = (pts: Pt[], sx: number, sz: number): Pt[] => pts.map(([x, z]) =>
 
 function vls(b: ModelBuilder, z: number, nx: number, nz: number): void {
   const w = nx * 1.15 + 0.6, l = nz * 1.15 + 0.6;
-  b.box(w, 0.35, l, 0, 3.2, z, HULL_DARK, { camo: 1.5, ao: 0.1 });
+  b.box(w, 0.35, l, 0, 3.2, z, HULL_DARK, { camo: 6, ao: 0.1 });
   for (let i = 0; i < nx; i++) {
     for (let j = 0; j < nz; j++) b.plate(0.9, 0.9, (i - (nx - 1) / 2) * 1.15, 3.4, z + (j - (nz - 1) / 2) * 1.15, HATCH);
   }
@@ -40,7 +40,7 @@ function gunTurret(b: ModelBuilder, y: number, z: number, big: boolean): void {
 }
 
 function funnel(b: ModelBuilder, z: number, y0: number, h: number, w: number, l: number): void {
-  b.slab([[-w / 2, -l / 2], [w / 2, -l / 2], [w / 2 * 0.9, l / 2], [-w / 2 * 0.9, l / 2]], y0, y0 + h, 0, 0, z, HULL, { top: [0.75, 0.8], topShift: l * 0.12, camo: 1.2 });
+  b.slab([[-w / 2, -l / 2], [w / 2, -l / 2], [w / 2 * 0.9, l / 2], [-w / 2 * 0.9, l / 2]], y0, y0 + h, 0, 0, z, HULL, { top: [0.75, 0.8], topShift: l * 0.12, camo: 6 });
   b.box(w * 0.62, 0.12, l * 0.66, 0, y0 + h + 0.05, z + l * 0.12, 0x2a2a26, { paint: P_FIXED });
   b.slab([[-w / 2 * 0.8, -l / 2 * 0.8], [w / 2 * 0.8, -l / 2 * 0.8], [w / 2 * 0.74, l / 2 * 0.8], [-w / 2 * 0.74, l / 2 * 0.8]], y0 + h - 1.1, y0 + h - 0.1, 0, 0, z + l * 0.04, 0xffffff, { paint: P_TEAM, top: [0.88, 0.9], ao: 0 });
 }
@@ -51,11 +51,11 @@ function shipModel(frigate: boolean): ModelDef {
   b.push(0, 0, 0, [0, 0, 0], [sx, 1, sz]);
   // Rumpf: unten schmaler, Deck mit Aufkantung; Back erhöht
   const bottom = scaleXZ(HULL_PLAN, 0.68, 0.97);
-  b.slab(bottom, -2.9, 3.0, 0, 0, 0, HULL, { top: [1 / 0.68, 1 / 0.97], camo: 1.4, ao: 0.1 });
+  b.slab(bottom, -2.9, 3.0, 0, 0, 0, HULL, { top: [1 / 0.68, 1 / 0.97], camo: 6, ao: 0.1 });
   b.slab(scaleXZ(HULL_PLAN, 0.94, 0.98), 3.0, 3.08, 0, 0, 0, DECK, { paint: P_CAMO, ao: 0 });
   // Vorschiff erhöht
   const fc: Pt[] = [[0, -74], [3.2, -65], [6.4, -48], [7.6, -32], [-7.6, -32], [-6.4, -48], [-3.2, -65]];
-  b.slab(fc, 3.0, 4.5, 0, 0, 0, HULL, { camo: 1.2, top: [0.96, 0.99] });
+  b.slab(fc, 3.0, 4.5, 0, 0, 0, HULL, { camo: 6, top: [0.96, 0.99] });
   b.slab(scaleXZ(fc, 0.92, 0.98), 4.5, 4.58, 0, 0, 0, DECK, { paint: P_CAMO, ao: 0 });
   // Bordwand-Teamstreifen
   b.mirror(() => b.plateSide(26, 0.8, 8.7 * 1.0, 1.7, -42, 1, 0xffffff, P_TEAM));
@@ -70,8 +70,8 @@ function shipModel(frigate: boolean): ModelDef {
   ciws(b, 0, 7.0, -27);
 
   // Vorderer Aufbau + Brücke (Tarnfläche, Flächen geneigt)
-  b.slab([[-4.8, -24], [4.8, -24], [5.7, -10], [5.7, 8], [-5.7, 8], [-5.7, -10]], 3.0, 9.2, 0, 0, 0, HULL_LIGHT, { top: [0.86, 0.92], camo: 1.6 });
-  b.slab([[-4.0, -20], [4.0, -20], [4.6, -10], [-4.6, -10]], 9.2, 12.4, 0, 0, 0, HULL, { top: [0.88, 0.8], camo: 1.4 });
+  b.slab([[-4.8, -24], [4.8, -24], [5.7, -10], [5.7, 8], [-5.7, 8], [-5.7, -10]], 3.0, 9.2, 0, 0, 0, HULL_LIGHT, { top: [0.86, 0.92], camo: 6 });
+  b.slab([[-4.0, -20], [4.0, -20], [4.6, -10], [-4.6, -10]], 9.2, 12.4, 0, 0, 0, HULL, { top: [0.88, 0.8], camo: 6 });
   b.box(7.6, 1.2, 0.12, 0, 10.9, -20.2, GLASS, { paint: P_FIXED, rot: [-0.15, 0, 0] });
   b.mirror(() => {
     b.plateSide(8, 1.0, 4.45, 10.9, -15, 1, 0x20303a);
@@ -81,7 +81,7 @@ function shipModel(frigate: boolean): ModelDef {
   // Brückenflügel
   b.mirror(() => b.box(2.0, 0.2, 5, 5.3, 10.4, -14.6, HULL_DARK, { camo: 1 }));
   // Mast mit Radar-Sensoren
-  b.box(1.2, 8.0, 1.2, 0, 16.4, -5.5, HULL_LIGHT, { camo: 1.5, top: [0.45, 0.45] });
+  b.box(1.2, 8.0, 1.2, 0, 16.4, -5.5, HULL_LIGHT, { camo: 6, top: [0.45, 0.45] });
   b.cyl(0.18, 7, 0, 23.5, -5.5, 'y', 0x6a6a62, { paint: P_FIXED }, 5, 0.06);
   b.box(4.4, 0.18, 0.18, 0, 20.5, -5.5, 0x6a6a62, { paint: P_FIXED });
   b.box(2.8, 1.8, 0.3, 0, 14.0, -5.5, 0x34404a, { paint: P_FIXED });
@@ -91,7 +91,7 @@ function shipModel(frigate: boolean): ModelDef {
   funnel(b, 12, 8.8, 5.5, 6.4, 7);
   if (!frigate) funnel(b, 24, 8.4, 4.8, 5.6, 6);
   // Hangar + Hubschrauberdeck
-  b.slab([[-5.4, 38], [5.4, 38], [5.4, 54], [-5.4, 54]], 3.0, 8.0, 0, 0, 0, HULL_LIGHT, { top: [0.96, 0.98], camo: 1.5 });
+  b.slab([[-5.4, 38], [5.4, 38], [5.4, 54], [-5.4, 54]], 3.0, 8.0, 0, 0, 0, HULL_LIGHT, { top: [0.96, 0.98], camo: 6 });
   b.plateFront(8, 4.6, 0, 5.6, 54.2, 1, 0x2a2a26);
   b.cyl(2.8, 0.12, 0, 3.12, 64.5, 'y', 0x6a6a64, { paint: P_FIXED }, 10);
   b.plate(0.6, 4.0, -0.9, 3.24, 64.5, WHITE);
@@ -127,8 +127,8 @@ export function buildSubmarine(): ModelDef {
     'z', 0, 0, 0, HULL, { seg: 10, camo: false, ao: 0.15 },
   );
   // Deckaufbau (flach), Sail mit Tauchrudern und Masten
-  b.box(2.2, 0.5, 40, 0, 4.4, 3, HULL_DARK, { camo: 1.5, top: [0.9, 1] });
-  b.extrudeX([[-6.2, 4.2], [-5.2, 9.2], [-1.0, 9.6], [3.2, 9.0], [4.2, 4.2]], 2.6, 0, 0, -10, HULL_LIGHT, { camo: 1.2, taper: [1, 0.75] });
+  b.box(2.2, 0.5, 40, 0, 4.4, 3, HULL_DARK, { camo: 6, top: [0.9, 1] });
+  b.extrudeX([[-6.2, 4.2], [-5.2, 9.2], [-1.0, 9.6], [3.2, 9.0], [4.2, 4.2]], 2.6, 0, 0, -10, HULL_LIGHT, { camo: 6, taper: [1, 0.75] });
   b.box(2.64, 1.0, 5.0, 0, 7.8, -10.5, 0xffffff, { paint: P_TEAM, ao: 0 });
   b.mirror(() => b.box(2.3, 0.18, 1.4, 2.2, 7.4, -13.4, HULL_DARK, { camo: 1, rot: [0, 0.0, 0] }));
   b.cyl(0.14, 3.2, 0.5, 11.3, -9.0, 'y', 0x4a4a44, { paint: P_FIXED }, 5);

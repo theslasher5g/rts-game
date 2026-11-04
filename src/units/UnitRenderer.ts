@@ -9,13 +9,13 @@
  * - Auswahlringe am Boden + Zustands-/Treibstoffbalken über ausgewählten Einheiten.
  */
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Settings } from '../core/types';
 import { blocOf, getProfile, getRelation } from '../game/countryData';
 import type { GeoData } from '../world/GeoData';
 import type { Unit, UnitTypeDef } from './types';
 import type { UnitManager } from './UnitManager';
 import { UNIT_TYPES } from './unitTypes';
+import { buildModels, modelKeyFor, rotorGeometry, type ModelDef as ModelDefT } from './models';
 
 // ---------------------------------------------------------------- Tuning
 /** Sichtmaßstab = clamp(K · Kameraabstand, MIN, MAX) */
@@ -30,470 +30,7 @@ const COUNTER_PX = 36;
 const BAR_W = 30;
 const BAR_H = 7;
 
-const P_FIXED = 0;
-const P_CAMO = 1;
-const P_TEAM = 2;
-
-// ---------------------------------------------------------------- Modellbau
-
-type V3 = [number, number, number];
-interface PartOpts {
-  paint?: number;
-  rot?: V3;
-  /** Skalierung der Oberseite (x, z) – Schrägen */
-  top?: [number, number];
-  /** Skalierung der Vorderseite (z < 0) in x – Pfeil-/Deltaformen */
-  front?: number;
-  /** Verschiebung der Oberseite in z */
-  topShift?: number;
-}
-
-class ModelBuilder {
-  private parts: THREE.BufferGeometry[] = [];
-
-  private add(g: THREE.BufferGeometry, x: number, y: number, z: number, color: number, o: PartOpts): this {
-    let geo = g.index ? g.toNonIndexed() : g;
-    if (geo !== g) g.dispose();
-    geo.deleteAttribute('uv');
-    geo.deleteAttribute('normal');
-    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-    if (o.top || o.front !== undefined || o.topShift) {
-      geo.computeBoundingBox();
-      const bb = geo.boundingBox!;
-      const cy = (bb.min.y + bb.max.y) / 2;
-      for (let i = 0; i < pos.count; i++) {
-        let vx = pos.getX(i), vz = pos.getZ(i);
-        const vy = pos.getY(i);
-        if (vy > cy && o.top) {
-          vx *= o.top[0];
-          vz *= o.top[1];
-        }
-        if (vy > cy && o.topShift) vz += o.topShift;
-        if (o.front !== undefined && vz < 0) {
-          const f = (-vz / Math.max(1e-6, -bb.min.z));
-          vx *= 1 - (1 - o.front) * f;
-        }
-        pos.setXYZ(i, vx, vy, vz);
-      }
-    }
-    const m = new THREE.Matrix4().compose(
-      new THREE.Vector3(x, y, z),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(...(o.rot ?? [0, 0, 0]), 'YXZ')),
-      new THREE.Vector3(1, 1, 1),
-    );
-    geo.applyMatrix4(m);
-    const n = pos.count;
-    const col = new Float32Array(n * 3);
-    const c = new THREE.Color(color);
-    for (let i = 0; i < n; i++) {
-      col[i * 3] = c.r;
-      col[i * 3 + 1] = c.g;
-      col[i * 3 + 2] = c.b;
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.setAttribute('aPaint', new THREE.BufferAttribute(new Float32Array(n).fill(o.paint ?? P_CAMO), 1));
-    this.parts.push(geo);
-    return this;
-  }
-
-  /** Quader (Breite x, Höhe y, Länge z), Mittelpunkt */
-  box(w: number, h: number, l: number, x: number, y: number, z: number, color = 0xdddddd, o: PartOpts = {}): this {
-    return this.add(new THREE.BoxGeometry(w, h, l), x, y, z, color, o);
-  }
-  /** Zylinder entlang Achse */
-  cyl(r: number, len: number, x: number, y: number, z: number, axis: 'x' | 'y' | 'z', color = 0xdddddd, o: PartOpts = {}, seg = 6, rTop?: number): this {
-    const g = new THREE.CylinderGeometry(rTop ?? r, r, len, seg);
-    if (axis === 'x') g.rotateZ(Math.PI / 2);
-    else if (axis === 'z') g.rotateX(-Math.PI / 2); // Oberseite (rTop) zeigt nach −Z (vorn)
-    return this.add(g, x, y, z, color, o);
-  }
-  /** Räder: Paare entlang z */
-  wheels(zs: number[], halfTrack: number, r: number, w: number, y = r): this {
-    for (const z of zs) {
-      this.cyl(r, w, -halfTrack, y, z, 'x', 0x24241f, { paint: P_FIXED }, 7);
-      this.cyl(r, w, halfTrack, y, z, 'x', 0x24241f, { paint: P_FIXED }, 7);
-    }
-    return this;
-  }
-  /** Ketten links/rechts */
-  tracks(halfTrack: number, w: number, h: number, l: number): this {
-    this.box(w, h, l, -halfTrack, h / 2, 0, 0x2a2a25, { paint: P_FIXED, top: [1, 0.92] });
-    this.box(w, h, l, halfTrack, h / 2, 0, 0x2a2a25, { paint: P_FIXED, top: [1, 0.92] });
-    return this;
-  }
-  /** Rohr: von Drehpunkt (x,y,z) nach vorn (−Z), Erhöhung elev rad */
-  barrel(r: number, len: number, x: number, y: number, z: number, elev = 0, color = 0xb0b0a8): this {
-    const cz = z - Math.cos(elev) * len / 2, cy = y + Math.sin(elev) * len / 2;
-    return this.cyl(r, len, x, cy, cz, 'z', color, { rot: [elev, 0, 0] }, 6, r * 0.85);
-  }
-
-  build(): THREE.BufferGeometry {
-    const g = mergeGeometries(this.parts, false);
-    for (const p of this.parts) p.dispose();
-    g.computeVertexNormals(); // nicht indiziert -> Flächennormalen (flat)
-    g.computeBoundingSphere();
-    return g;
-  }
-}
-
-/** Erkennungsfarben */
-const DARK = 0x2c2c28;
-const GLASS = 0x1e2a30;
-const GUN = 0x8c8c84;
-
-interface ModelDef {
-  geom: THREE.BufferGeometry;
-  /** Länge/Ausdehnung in m (für Abstand & Culling) */
-  size: number;
-  /** zusätzliche Vergrößerung für Lesbarkeit */
-  boost: number;
-  /** Rotoren: [x, y, z, Radius] in m */
-  rotors?: Array<[number, number, number, number]>;
-  /** Tarnfarbe: Boden / Luft / See */
-  livery: 'ground' | 'air' | 'naval' | 'heli';
-  /** Neigung am Hang */
-  tilt: boolean;
-}
-
-function buildModels(): Record<string, ModelDef> {
-  const M: Record<string, ModelDef> = {};
-
-  // Kampfpanzer (mittel, z. B. Leopard 2A6-Klasse)
-  const mbt = (heavy: boolean) => {
-    const k = heavy ? 1.08 : 1;
-    const b = new ModelBuilder()
-      .tracks(1.55 * k, 0.75 * k, 1.0 * k, 7.8 * k)
-      .box(2.5 * k, 0.85 * k, 7.4 * k, 0, 1.3 * k, 0, 0xcfcfcf, { top: [0.92, 0.9], topShift: 0.3 })
-      .box(3.6 * k, 0.12 * k, 7.0 * k, 0, 1.05 * k, 0.1, 0xb8b8b8) // Kettenschürzen
-      .box(2.7 * k, 0.75 * k, 3.4 * k, 0, 2.1 * k, 0.6 * k, 0xf0f0f0, { top: [0.82, 0.8], front: heavy ? 0.6 : 0.8 })
-      .box(0.9 * k, 0.35 * k, 0.9 * k, -0.6 * k, 2.6 * k, 1.2 * k, 0xd8d8d8) // Kommandantenoptik
-      .barrel(0.1 * k, 5.4 * k, 0, 2.15 * k, -1.0 * k, 0.02)
-      .box(1.8 * k, 0.06 * k, 1.0 * k, 0.2, 2.5 * k, 1.6 * k, 0xffffff, { paint: P_TEAM }) // Erkennungstafel
-      .box(2.52 * k, 0.2 * k, 0.4 * k, 0, 1.55 * k, 3.5 * k, 0xffffff, { paint: P_TEAM });
-    return b.build();
-  };
-  M.mbt = { geom: mbt(false), size: 9.5, boost: 1, livery: 'ground', tilt: true };
-  M.mbt_heavy = { geom: mbt(true), size: 10.2, boost: 1, livery: 'ground', tilt: true };
-
-  M.light_tank = {
-    geom: new ModelBuilder()
-      .tracks(1.3, 0.6, 0.85, 6.4)
-      .box(2.2, 0.8, 6.2, 0, 1.15, 0, 0xcfcfcf, { top: [0.9, 0.88] })
-      .box(2.0, 0.65, 2.6, 0, 1.85, 0.5, 0xf0f0f0, { top: [0.8, 0.8] })
-      .barrel(0.08, 4.0, 0, 1.9, -0.8, 0.02)
-      .box(1.4, 0.05, 0.9, 0, 2.2, 1.2, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 7,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Schützenpanzer (Puma/Marder-Klasse)
-  M.ifv = {
-    geom: new ModelBuilder()
-      .tracks(1.45, 0.65, 0.95, 7.0)
-      .box(2.9, 1.35, 6.9, 0, 1.55, 0, 0xcfcfcf, { top: [0.9, 0.86], topShift: 0.35 })
-      .box(1.5, 0.55, 1.9, 0.25, 2.5, -0.2, 0xf0f0f0, { top: [0.8, 0.8] })
-      .barrel(0.05, 2.6, 0.25, 2.55, -1.1, 0.03, GUN)
-      .box(2.2, 0.06, 1.6, 0, 2.25, 2.3, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 7.2,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Spähwagen 4x4 (Fennek-artig)
-  M.recon_4x4 = {
-    geom: new ModelBuilder()
-      .wheels([-1.5, 1.5], 1.0, 0.5, 0.35)
-      .box(2.3, 1.0, 5.0, 0, 1.15, 0, 0xcfcfcf, { top: [0.85, 0.75], topShift: 0.4 })
-      .box(1.3, 0.12, 0.9, 0, 1.7, -0.5, GLASS, { paint: P_FIXED })
-      .box(0.5, 0.35, 0.5, 0, 1.85, 0.6, 0xe0e0e0)
-      .cyl(0.04, 1.6, 0, 2.2, 0.6, 'y', DARK, { paint: P_FIXED }, 4) // Mast
-      .box(1.2, 0.05, 1.0, 0, 1.68, 1.5, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 5.2,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Radschützenpanzer 8x8 (Boxer-artig)
-  M.recon_8x8 = {
-    geom: new ModelBuilder()
-      .wheels([-2.7, -1.2, 1.2, 2.7], 1.2, 0.6, 0.4)
-      .box(2.8, 1.6, 7.6, 0, 1.75, 0, 0xcfcfcf, { top: [0.88, 0.92], front: 0.85 })
-      .box(1.4, 0.55, 1.8, 0, 2.8, -0.6, 0xf0f0f0, { top: [0.8, 0.8] })
-      .barrel(0.05, 2.4, 0, 2.85, -1.5, 0.03, GUN)
-      .box(2.0, 0.06, 1.8, 0, 2.58, 2.3, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 8,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Panzerhaubitze (PzH 2000-artig): großer Turm hinten, langes erhobenes Rohr
-  M.spg = {
-    geom: new ModelBuilder()
-      .tracks(1.5, 0.7, 1.0, 7.6)
-      .box(2.9, 0.9, 7.4, 0, 1.4, 0, 0xcfcfcf, { top: [0.92, 0.9] })
-      .box(3.0, 1.3, 4.0, 0, 2.45, 1.2, 0xf0f0f0, { top: [0.86, 0.9] })
-      .barrel(0.11, 8.0, 0, 2.6, -0.8, 0.35)
-      .box(1.8, 0.06, 1.6, 0, 3.12, 2.0, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 11,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Raketenartillerie (LKW mit Startbehälter)
-  M.mlrs = {
-    geom: new ModelBuilder()
-      .wheels([-2.6, 0.6, 2.2], 1.05, 0.55, 0.4)
-      .box(2.5, 0.5, 8.0, 0, 1.0, 0.2, 0x9a9a92, { paint: P_CAMO })
-      .box(2.5, 1.7, 2.0, 0, 2.0, -3.0, 0xdedede, { top: [0.95, 0.75], topShift: 0.2 })
-      .box(2.0, 0.5, 0.15, 0, 2.3, -4.0, GLASS, { paint: P_FIXED })
-      .box(2.4, 1.2, 4.4, 0, 2.4, 1.4, 0xf0f0f0, { rot: [0.22, 0, 0] })
-      .box(2.36, 1.16, 0.06, 0, 2.95, -0.75, DARK, { paint: P_FIXED, rot: [0.22, 0, 0] })
-      .box(1.6, 0.06, 1.2, 0, 2.88, -3.0, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 9,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Flakpanzer (Gepard-artig): Turm mit 2 Kanonen + Radar
-  M.spaa = {
-    geom: new ModelBuilder()
-      .tracks(1.45, 0.65, 0.95, 7.2)
-      .box(2.8, 0.9, 7.0, 0, 1.35, 0, 0xcfcfcf, { top: [0.92, 0.9] })
-      .box(2.4, 1.1, 2.8, 0, 2.35, 0.6, 0xf0f0f0, { top: [0.85, 0.85] })
-      .barrel(0.06, 3.4, -1.45, 2.5, -0.2, 0.25, GUN)
-      .barrel(0.06, 3.4, 1.45, 2.5, -0.2, 0.25, GUN)
-      .cyl(0.95, 0.12, 0, 3.6, 1.6, 'z', 0xd8d8d8, { rot: [0.3, 0, 0] }, 10) // Suchradar (Schüssel)
-      .cyl(0.06, 0.8, 0, 3.15, 1.6, 'y', DARK, { paint: P_FIXED }, 4)
-      .box(1.4, 0.06, 1.0, 0, 2.92, 0.0, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 7.5,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Flugabwehrraketen-Startgerät (8x8-LKW mit 4 Behältern)
-  M.sam = {
-    geom: new ModelBuilder()
-      .wheels([-3.6, -2.2, 1.8, 3.2], 1.1, 0.6, 0.42)
-      .box(2.5, 0.6, 10.0, 0, 1.1, 0, 0x9a9a92)
-      .box(2.5, 1.6, 2.2, 0, 2.1, -4.2, 0xdedede, { top: [0.95, 0.75] })
-      .box(2.0, 0.45, 0.15, 0, 2.4, -5.3, GLASS, { paint: P_FIXED })
-      .box(1.1, 1.1, 6.0, -0.6, 2.7, 1.2, 0xf0f0f0, { rot: [0.5, 0, 0] })
-      .box(1.1, 1.1, 6.0, 0.6, 2.7, 1.2, 0xe8e8e8, { rot: [0.5, 0, 0] })
-      .box(1.1, 1.1, 6.0, -0.6, 3.8, 1.8, 0xe8e8e8, { rot: [0.5, 0, 0] })
-      .box(1.1, 1.1, 6.0, 0.6, 3.8, 1.8, 0xf0f0f0, { rot: [0.5, 0, 0] })
-      .box(1.6, 0.06, 1.4, 0, 2.93, -4.2, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 11,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Versorgungs-LKW (Planen-LKW)
-  M.truck = {
-    geom: new ModelBuilder()
-      .wheels([-2.4, 1.2, 2.5], 1.0, 0.5, 0.38)
-      .box(2.4, 0.4, 7.4, 0, 0.95, 0.1, 0x9a9a92)
-      .box(2.4, 1.6, 1.9, 0, 1.95, -2.7, 0xdedede, { top: [0.95, 0.8], topShift: 0.15 })
-      .box(2.0, 0.5, 0.12, 0, 2.2, -3.62, GLASS, { paint: P_FIXED })
-      .box(2.5, 2.0, 4.8, 0, 2.15, 1.3, 0xf4f4f4, { top: [0.96, 1] }) // Plane
-      .box(1.6, 0.06, 1.2, 0, 2.78, -2.7, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 8,
-    boost: 1,
-    livery: 'ground',
-    tilt: true,
-  };
-
-  // Soldat (Beine, Torso, Kopf/Helm, Gewehr, Rucksack in Teamfarbe)
-  M.soldier = {
-    geom: new ModelBuilder()
-      .box(0.2, 0.85, 0.24, -0.12, 0.43, 0, 0xa8a8a0)
-      .box(0.2, 0.85, 0.24, 0.12, 0.43, 0.05, 0xa8a8a0)
-      .box(0.5, 0.62, 0.3, 0, 1.17, 0, 0xe8e8e8, { top: [1.05, 1] })
-      .box(0.26, 0.26, 0.28, 0, 1.62, -0.01, 0xbcbcb4, { top: [0.8, 0.8] })
-      .box(0.07, 0.08, 0.95, 0.2, 1.22, -0.32, DARK, { paint: P_FIXED, rot: [0.2, 0, 0] })
-      .box(0.38, 0.42, 0.2, 0, 1.2, 0.24, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 0.7,
-    boost: 2.2,
-    livery: 'ground',
-    tilt: false,
-  };
-
-  // Kampfhubschrauber (Tiger/Apache-artig)
-  M.heli_attack = {
-    geom: new ModelBuilder()
-      .box(1.2, 1.6, 6.0, 0, 1.7, -1.0, 0xe8e8e8, { top: [0.7, 0.85], front: 0.55 })
-      .box(0.9, 0.7, 1.8, 0, 2.5, -2.2, GLASS, { paint: P_FIXED, top: [0.7, 0.7] })
-      .cyl(0.32, 6.5, 0, 1.9, 4.6, 'z', 0xd0d0d0, {}, 6, 0.42)
-      .box(0.12, 1.6, 1.2, 0, 2.6, 7.6, 0xffffff, { paint: P_TEAM, top: [1, 0.7], topShift: 0.4 })
-      .box(2.2, 0.08, 0.9, 0, 1.95, 7.4, 0xc8c8c8)
-      .box(4.4, 0.12, 1.0, 0, 1.55, -0.4, 0xd8d8d8)
-      .box(0.3, 0.3, 1.4, -2.0, 1.3, -0.5, DARK, { paint: P_FIXED })
-      .box(0.3, 0.3, 1.4, 2.0, 1.3, -0.5, DARK, { paint: P_FIXED })
-      .cyl(0.18, 0.7, 0, 2.75, -0.8, 'y', DARK, { paint: P_FIXED }, 5)
-      .box(0.15, 0.6, 0.15, -0.7, 0.55, -1.8, DARK, { paint: P_FIXED })
-      .box(0.15, 0.6, 0.15, 0.7, 0.55, -1.8, DARK, { paint: P_FIXED })
-      .box(0.15, 0.6, 0.15, 0, 0.55, 4.0, DARK, { paint: P_FIXED })
-      .build(),
-    size: 15,
-    boost: 1,
-    rotors: [[0, 3.1, -0.8, 6.5]],
-    livery: 'heli',
-    tilt: false,
-  };
-
-  // Transporthubschrauber (Tandemrotor, CH-47-artig)
-  M.heli_transport = {
-    geom: new ModelBuilder()
-      .box(2.6, 2.6, 14.5, 0, 2.0, 0, 0xe8e8e8, { top: [0.9, 0.96], front: 0.8 })
-      .box(2.0, 0.8, 1.4, 0, 2.7, -7.0, GLASS, { paint: P_FIXED, top: [0.8, 0.6] })
-      .box(1.6, 1.5, 3.0, 0, 3.9, 5.6, 0xd8d8d8, { top: [0.6, 0.7] })
-      .box(1.2, 0.8, 1.6, 0, 3.6, -5.6, 0xd8d8d8, { top: [0.6, 0.7] })
-      .box(0.8, 1.0, 3.6, -1.6, 1.3, 0.6, 0xc8c8c8)
-      .box(0.8, 1.0, 3.6, 1.6, 1.3, 0.6, 0xc8c8c8)
-      .box(2.64, 0.4, 2.0, 0, 2.2, 3.0, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 20,
-    boost: 1,
-    rotors: [
-      [0, 4.25, -5.6, 9],
-      [0, 4.75, 5.6, 9],
-    ],
-    livery: 'heli',
-    tilt: false,
-  };
-
-  // Kampfflugzeug (Delta/Canard, Eurofighter/Gripen-artig)
-  M.jet = {
-    geom: new ModelBuilder()
-      .cyl(0.7, 13.5, 0, 0, 0.5, 'z', 0xe8e8e8, {}, 7, 0.45)
-      .cyl(0.45, 2.6, 0, 0, -7.5, 'z', 0xd8d8d8, {}, 7, 0.05)
-      .box(0.75, 0.45, 2.4, 0, 0.55, -4.0, GLASS, { paint: P_FIXED, top: [0.6, 0.7] })
-      .box(10.5, 0.18, 6.0, 0, -0.1, 3.0, 0xdedede, { front: 0.08 })
-      .box(3.2, 0.1, 1.0, 0, 0.1, -4.6, 0xd0d0d0, { front: 0.3 })
-      .box(0.15, 3.0, 3.0, 0, 1.6, 5.3, 0xffffff, { paint: P_TEAM, top: [1, 0.45], topShift: 0.9 })
-      .cyl(0.5, 0.6, 0, 0, 7.5, 'z', DARK, { paint: P_FIXED }, 7)
-      .build(),
-    size: 16,
-    boost: 1.2,
-    livery: 'air',
-    tilt: false,
-  };
-
-  // Jagdbomber (größer, Schwenkflügel/Tornado-artig, zwei Leitwerke)
-  M.bomber = {
-    geom: new ModelBuilder()
-      .cyl(1.0, 17, 0, 0, 0.5, 'z', 0xe8e8e8, {}, 7, 0.7)
-      .cyl(0.7, 3.4, 0, 0, -9.7, 'z', 0xd8d8d8, {}, 7, 0.06)
-      .box(1.0, 0.6, 3.0, 0, 0.8, -6.2, GLASS, { paint: P_FIXED, top: [0.6, 0.7] })
-      .box(7.0, 0.2, 2.6, -3.8, 0, 1.0, 0xdedede, { rot: [0, -0.55, 0], front: 0.6 })
-      .box(7.0, 0.2, 2.6, 3.8, 0, 1.0, 0xdedede, { rot: [0, 0.55, 0], front: 0.6 })
-      .box(7.5, 0.15, 2.6, 0, 0, 7.5, 0xd0d0d0, { front: 0.4 })
-      .box(0.18, 3.4, 3.2, -1.0, 1.8, 7.4, 0xffffff, { paint: P_TEAM, top: [1, 0.45], topShift: 1.0, rot: [0, 0, 0.15] })
-      .box(0.18, 3.4, 3.2, 1.0, 1.8, 7.4, 0xffffff, { paint: P_TEAM, top: [1, 0.45], topShift: 1.0, rot: [0, 0, -0.15] })
-      .build(),
-    size: 22,
-    boost: 1.2,
-    livery: 'air',
-    tilt: false,
-  };
-
-  // Aufklärungsdrohne (MALE, Bayraktar/Heron-artig)
-  M.drone_fixed = {
-    geom: new ModelBuilder()
-      .cyl(0.35, 6.5, 0, 0, 0, 'z', 0xe8e8e8, {}, 6, 0.3)
-      .box(14, 0.12, 0.9, 0, 0.15, -0.2, 0xdedede)
-      .box(0.9, 0.13, 0.9, -6.6, 0.16, -0.2, 0xffffff, { paint: P_TEAM })
-      .box(0.9, 0.13, 0.9, 6.6, 0.16, -0.2, 0xffffff, { paint: P_TEAM })
-      .box(2.4, 0.1, 0.7, -0.7, 0.5, 3.1, 0xd0d0d0, { rot: [0, 0, 0.6] })
-      .box(2.4, 0.1, 0.7, 0.7, 0.5, 3.1, 0xd0d0d0, { rot: [0, 0, -0.6] })
-      .cyl(0.12, 0.25, 0, 0, 3.4, 'z', DARK, { paint: P_FIXED }, 5)
-      .build(),
-    size: 12,
-    boost: 1.6,
-    livery: 'air',
-    tilt: false,
-  };
-
-  // FPV-/Quadrokopter
-  M.drone_quad = {
-    geom: new ModelBuilder()
-      .box(0.14, 0.07, 0.22, 0, 0.1, 0, 0xe0e0e0)
-      .box(0.5, 0.025, 0.03, 0, 0.1, 0, DARK, { paint: P_FIXED, rot: [0, Math.PI / 4, 0] })
-      .box(0.5, 0.025, 0.03, 0, 0.1, 0, DARK, { paint: P_FIXED, rot: [0, -Math.PI / 4, 0] })
-      .box(0.1, 0.05, 0.08, 0, 0.16, 0.05, 0xffffff, { paint: P_TEAM })
-      .build(),
-    size: 0.5,
-    boost: 7,
-    rotors: [
-      [0.18, 0.13, 0.18, 0.1],
-      [-0.18, 0.13, 0.18, 0.1],
-      [0.18, 0.13, -0.18, 0.1],
-      [-0.18, 0.13, -0.18, 0.1],
-    ],
-    livery: 'air',
-    tilt: false,
-  };
-
-  // Schiffe: Rumpf (spitzer Bug), Aufbauten, Geschütz, Mast; Teamfarbe am Schornstein
-  const ship = (L: number, B: number, destroyer: boolean) => {
-    const b = new ModelBuilder()
-      .box(B, 4.5, L, 0, 0.5, 0, 0xc8c8c8, { front: 0.05, top: [1.08, 1.02] })
-      .box(B * 1.02, 0.3, L * 0.96, 0, 2.85, 0.02 * L, 0x9a9a96, { front: 0.08 }) // Deck
-      .box(B * 0.7, 5.0, L * 0.22, 0, 5.4, -0.08 * L, 0xf0f0f0, { top: [0.85, 0.8] })
-      .box(B * 0.55, 3.2, L * 0.14, 0, 4.6, 0.18 * L, 0xe8e8e8, { top: [0.9, 0.85] })
-      .box(B * 0.3, 3.5, L * 0.06, 0, 8.0, 0.05 * L, 0xffffff, { paint: P_TEAM, top: [0.8, 0.8] }) // Schornstein
-      .cyl(0.35, 14, 0, 12, -0.08 * L, 'y', 0x9a9a96, {}, 4) // Mast
-      .box(B * 0.3, 2.0, 3.2, 0, 3.9, -0.3 * L, 0xe0e0e0, { top: [0.8, 0.8] }) // Geschützturm
-      .barrel(0.25, 6.5, 0, 4.0, -0.3 * L - 1.6, 0.06, GUN)
-      .box(B * 0.5, 1.2, 0.12 * L, 0, 3.5, 0.38 * L, 0xbcbcbc); // Hubschrauberdeck/Hangar
-    if (destroyer) b.box(B * 0.45, 1.0, 6, 0, 3.4, -0.18 * L, 0xbcbcbc); // VLS
-    return b.build();
-  };
-  M.destroyer = { geom: ship(150, 18, true), size: 150, boost: 0.35, livery: 'naval', tilt: false };
-  M.frigate = { geom: ship(120, 15, false), size: 120, boost: 0.4, livery: 'naval', tilt: false };
-  M.submarine = {
-    geom: new ModelBuilder()
-      .cyl(4.5, 70, 0, 0, 0, 'z', 0xb0b0b0, {}, 10)
-      .cyl(4.5, 8, 0, 0, -39, 'z', 0xa8a8a8, {}, 10, 1.2)
-      .cyl(4.5, 8, 0, 0, 39, 'z', 0xa8a8a8, {}, 10, 0.8)
-      .box(2.0, 5.0, 9.0, 0, 6.0, -12, 0xb8b8b8, { top: [0.8, 0.7] })
-      .box(2.04, 1.2, 4.0, 0, 7.5, -12.5, 0xffffff, { paint: P_TEAM })
-      .box(0.4, 4.0, 3.0, 0, 3, 42, DARK, { paint: P_FIXED })
-      .build(),
-    size: 86,
-    boost: 0.45,
-    livery: 'naval',
-    tilt: false,
-  };
-  return M;
-}
-
-function buildRotorGeom(): THREE.BufferGeometry {
-  // Einheitsradius 1, zwei gekreuzte Blätter + Nabe
-  return new ModelBuilder()
-    .box(2, 0.04, 0.09, 0, 0, 0, 0x1c1c1a, { paint: P_FIXED })
-    .box(0.09, 0.04, 2, 0, 0, 0, 0x1c1c1a, { paint: P_FIXED })
-    .cyl(0.1, 0.15, 0, 0, 0, 'y', 0x1c1c1a, { paint: P_FIXED }, 5)
-    .build();
-}
+type ModelDef = ModelDefT;
 
 // ---------------------------------------------------------------- Farben
 
@@ -521,12 +58,12 @@ interface OwnerColors {
 
 type Sym =
   | 'inf' | 'mg' | 'at' | 'sniper' | 'medic' | 'eng' | 'mortar' | 'recon_w' | 'mech' | 'mech_w' | 'armor' | 'armor_l'
-  | 'art' | 'mlrs' | 'aa' | 'sam' | 'supply' | 'rotary' | 'rotary_t' | 'fixed' | 'bomber' | 'uav' | 'fpv' | 'surface' | 'sub';
+  | 'medic_v' | 'aid' | 'hospital' | 'art' | 'mlrs' | 'aa' | 'sam' | 'supply' | 'rotary' | 'rotary_t' | 'fixed' | 'bomber' | 'uav' | 'fpv' | 'surface' | 'sub';
 
 const TYPE_SYMBOL: Record<string, Sym> = {
   inf_squad: 'inf', mg_team: 'mg', at_team: 'at', sniper_team: 'sniper', medic_team: 'medic', engineer_squad: 'eng',
   mortar_team: 'mortar', recon_wheeled: 'recon_w', ifv: 'mech', apc_wheeled: 'mech_w', light_tank: 'armor_l',
-  mbt_medium: 'armor', mbt_heavy: 'armor', sp_artillery: 'art', mlrs: 'mlrs', spaa: 'aa', sam: 'sam', supply_truck: 'supply',
+  mbt_medium: 'armor', mbt_heavy: 'armor', sp_artillery: 'art', mlrs: 'mlrs', spaa: 'aa', sam: 'sam', supply_truck: 'supply', aid_convoy: 'aid', field_hospital: 'hospital', ambulance: 'medic_v',
   attack_heli: 'rotary', transport_heli: 'rotary_t', fighter: 'fixed', bomber: 'bomber', recon_drone: 'uav', fpv_swarm: 'fpv',
   destroyer: 'surface', frigate: 'surface', submarine: 'sub',
 };
@@ -714,6 +251,29 @@ function drawCounter(ctx: CanvasRenderingContext2D, ox: number, oy: number, t: U
       ctx.lineWidth = 3;
       line(-hw - 3, hh - 4, hw + 3, hh - 4);
       text('V', 12, -2);
+      break;
+    case 'medic_v':
+      ctx.lineWidth = 3;
+      line(0, -hh + 3, 0, hh - 5);
+      line(-hh + 3, -2, hh - 3, -2);
+      wheels();
+      break;
+    case 'aid':
+      ctx.lineWidth = 3;
+      line(-hw - 3, hh - 4, hw + 3, hh - 4);
+      line(0, -hh + 2, 0, hh - 7);
+      line(-6, -3, 6, -3);
+      break;
+    case 'hospital':
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, cy + 8);
+      ctx.lineTo(cx, cy - 8);
+      ctx.lineTo(cx + 10, cy + 8);
+      ctx.stroke();
+      ctx.lineWidth = 3;
+      line(0, -3, 0, 7);
+      line(-5, 2, 5, 2);
       break;
     case 'rotary':
     case 'rotary_t': {
@@ -910,6 +470,7 @@ const _frustum = new THREE.Frustum();
 const _pv = new THREE.Matrix4();
 const _xAxis = new THREE.Vector3(1, 0, 0);
 const _yAxis = new THREE.Vector3(0, 1, 0);
+const _qTail = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
 const _tmpOff = new Float32Array(64);
 const _ringColor = new THREE.Color();
 
@@ -992,7 +553,7 @@ export class UnitRenderer {
       this.slots.set(key, slot);
       group.add(slot.mesh);
     }
-    this.rotorSlot = this.makeSlot({ geom: buildRotorGeom(), size: 1, boost: 1, livery: 'air', tilt: false }, 16);
+    this.rotorSlot = this.makeSlot({ geom: rotorGeometry(), size: 1, boost: 1, livery: 'air', tilt: false }, 16);
     group.add(this.rotorSlot.mesh);
 
     // NATO-Zeichen
@@ -1057,7 +618,7 @@ export class UnitRenderer {
   /** Welt-Radius (km), den eine Einheit beim aktuellen Zoom optisch abdeckt (für Picking) */
   visualRadiusKm(u: Unit): number {
     if (this.counterMode) return (COUNTER_PX * 0.5) * this.pxKm;
-    const def = this.models[u.type.model];
+    const def = this.models[this.keyOf(u)];
     if (!def) return 0.05 * this.visScale;
     return Math.max(this.unitRadius(def, u.type.memberCount), 10 * this.pxKm);
   }
@@ -1119,7 +680,7 @@ export class UnitRenderer {
     if (!this.counterMode) {
       for (let i = 0; i < n; i++) {
         const u = units[i];
-        const slot = this.slots.get(u.type.model);
+        const slot = this.slots.get(this.keyOf(u));
         if (!slot) continue;
         slot.need += u.type.memberCount;
         if (slot.def.rotors) this.rotorSlot.need += u.type.memberCount * slot.def.rotors.length;
@@ -1137,7 +698,7 @@ export class UnitRenderer {
 
     for (let i = 0; i < n; i++) {
       const u = units[i];
-      const def = this.models[u.type.model];
+      const def = this.models[this.keyOf(u)];
       const domain = u.type.mobility.domain;
       const ground = domain === 'naval' ? 0 : Math.max(0, this.geo.heightAt(u.x, u.z)) * this.exag;
       let uy = u.y;
@@ -1221,6 +782,16 @@ export class UnitRenderer {
 
   // ------------------------------------------------------------ intern
 
+  private readonly keyCache = new Map<UnitTypeDef, Map<string, string>>();
+  /** Modell-Slot-Schlüssel (Variante je Typ/Besitzerland) */
+  private keyOf(u: Unit): string {
+    let m = this.keyCache.get(u.type);
+    if (!m) this.keyCache.set(u.type, (m = new Map()));
+    let k = m.get(u.owner);
+    if (k === undefined) m.set(u.owner, (k = modelKeyFor(u.type.model, u.type.id, u.owner)));
+    return k;
+  }
+
   private unitRadius(def: ModelDef, members: number): number {
     const sp = this.memberSpacing(def);
     return this.visScale * 0.001 * (def.size * def.boost * 0.6 + sp * Math.sqrt(members) * 0.9);
@@ -1234,7 +805,7 @@ export class UnitRenderer {
   private drawUnit(u: Unit, def: ModelDef, uy: number, s: number, dt: number, smooth: number, time: number): void {
     // Phase 3: besetzte Gebäude -> unsichtbar
     if (u.garrisonId) return;
-    const slot = this.slots.get(u.type.model)!;
+    const slot = this.slots.get(this.keyOf(u))!;
     // Phase 3: gefallene Soldaten nicht zeichnen (membersAlive, falls vom CombatSystem gesetzt)
     const nAll = Math.min(u.type.memberCount, 32);
     const n = Math.max(0, Math.min(nAll, Math.ceil(u.membersAlive ?? nAll)));
@@ -1384,9 +955,11 @@ export class UnitRenderer {
         const ric = rs.mesh.instanceColor!.array as Float32Array;
         for (let r = 0; r < def.rotors.length; r++) {
           if (rs.count >= rs.cap) break;
-          const [rx, ry, rz, rad] = def.rotors[r];
-          const spin = airborne ? time * (def.size < 2 ? 60 : 22) * (r % 2 === 0 ? 1 : -1) : (u.id * 0.7 + i + r) % 3;
+          const [rx, ry, rz, rad, axis] = def.rotors[r];
+          const tail = axis === 'x';
+          const spin = airborne ? time * (def.size < 2 ? 60 : tail ? 40 : 22) * (r % 2 === 0 ? 1 : -1) : (u.id * 0.7 + i + r) % 3;
           _q2.setFromAxisAngle(_yAxis, spin);
+          if (tail) _q2.premultiply(_qTail); // Scheibe senkrecht (Normale = x)
           _m2.compose(_p.set(rx, ry, rz), _q2, _s.set(rad, 1, rad));
           _m2.premultiply(_m);
           rs.mesh.setMatrixAt(rs.count, _m2);
