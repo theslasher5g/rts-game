@@ -137,7 +137,7 @@ function flagpole(b: GB, t: GB, x: number, z: number, h: number, fw = 6, fh = 3.
 
 function buildRig(): Model {
   const b = new GB(), t = new GB();
-  b.box(26, 0.5, 20, 0, 0, 0, PAD);
+  b.box(26, 25.6, 20, 0, -25, 0, PAD);
   b.box(3.4, 2.8, 3.2, -10, 0.5, 6, 0x8a8478).tent(3.8, 1.2, 3.6, -10, 3.3, 6, ROOF, Math.PI / 2);
   // Samson-Pfosten (A-Bock)
   for (const s of [-1, 1]) b.box(0.7, 11, 0.7, 0, 0.5, s * 1.5, BLUEGREY, 0, 0, -s * 0.14);
@@ -166,7 +166,7 @@ function buildRig(): Model {
 
 function buildRefinery(): Model {
   const b = new GB(), t = new GB();
-  b.box(230, 0.6, 180, 0, 0, 0, PAD);
+  b.box(230, 25.6, 180, 0, -25, 0, PAD);
   // Kolonnen (Destillationstürme)
   const hs = [58, 46, 38];
   hs.forEach((h, i) => {
@@ -213,7 +213,7 @@ function buildRefinery(): Model {
 
 function buildHq(): Model {
   const b = new GB(), t = new GB();
-  b.box(150, 0.6, 120, 0, 0, 0, 0x7c7b6c);
+  b.box(150, 25.6, 120, 0, -25, 0, 0x7c7b6c);
   b.box(46, 14, 24, 0, 0.6, -14, 0xbdb59a).box(49, 1.6, 27, 0, 14.6, -14, ROOF);
   for (let i = -2; i <= 2; i++) b.cyl(0.9, 9, i * 6, 0.6, 0.5, 0xe0dccb, 8);
   b.box(36, 1, 6, 0, 9.6, 0.5, 0xd0ccb8);
@@ -237,7 +237,7 @@ function buildHq(): Model {
 
 function buildBarracks(): Model {
   const b = new GB(), t = new GB();
-  b.box(92, 0.5, 72, 0, 0, 0, 0x7d7a68);
+  b.box(92, 25.6, 72, 0, -25, 0, 0x7d7a68);
   for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
     b.tent(8.5, 5, 15, -24 + i * 14, 0.5, -16 + j * 22, j ? 0x6a7550 : 0x76805a, 0);
     t.box(0.2, 0.5, 15, -24 + i * 14, 5.2, -16 + j * 22, 0xffffff);
@@ -256,7 +256,7 @@ function buildBarracks(): Model {
 
 function buildFactory(): Model {
   const b = new GB(), t = new GB();
-  b.box(120, 0.5, 96, 0, 0, 0, PAD);
+  b.box(120, 25.6, 96, 0, -25, 0, PAD);
   // Hallen mit Sheddach
   b.box(56, 13, 30, -24, 0.5, -26, 0x8f9298).box(48, 13, 28, -28, 0.5, 14, 0x8a8c90);
   for (let i = 0; i < 4; i++) b.tent(14, 5, 30, -44 + i * 14, 13.5, -26, 0x6a707a, 0);
@@ -281,7 +281,7 @@ function buildFactory(): Model {
 
 function buildAirfield(): Model {
   const b = new GB(), t = new GB();
-  b.box(320, 0.3, 20, 0, 0, 0, 0x34342f);
+  b.box(320, 25.6, 20, 0, -25, 0, 0x34342f);
   for (let i = -14; i <= 14; i++) b.box(7, 0.1, 0.9, i * 10.5, 0.3, 0, 0xe4e4dc);
   for (const sx of [-1, 1]) b.box(0.9, 0.1, 18, sx * 156, 0.3, 0, 0xe4e4dc);
   b.box(260, 0.3, 8, 0, 0, 24, 0x3c3c37).box(90, 0.3, 40, -45, 0, 46, 0x464640);
@@ -306,7 +306,7 @@ function buildAirfield(): Model {
 
 function buildShipyard(): Model {
   const b = new GB(), t = new GB();
-  b.box(168, 0.5, 108, 0, 0, 0, PAD);
+  b.box(168, 25.6, 108, 0, -25, 0, PAD);
   b.box(170, 3.4, 14, 0, 0, -44, 0x77776e); // Kai
   b.box(80, 1.6, 26, 10, 0.5, -16, 0x6a6a60); // Helling
   // Rumpf im Bau (Rippen + Beplankung)
@@ -328,7 +328,7 @@ function buildShipyard(): Model {
 
 function buildDepot(fuel: boolean): Model {
   const b = new GB(), t = new GB();
-  b.box(72, 0.4, 60, 0, 0, 0, 0x78766a);
+  b.box(72, 25.6, 60, 0, -25, 0, 0x78766a);
   if (!fuel) {
     const cc = [0x8a7a55, 0x6a6a50, 0x4a5a3a, 0x7a6a45];
     for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) b.box(7, 3.2, 5, -22 + i * 9, 0.4, -14 + j * 7, cc[(i + j) % 4]).box(6, 2.6, 4.4, -22 + i * 9, 3.6, -14 + j * 7, cc[(i + j + 1) % 4]);
@@ -480,7 +480,7 @@ export class SiteLayer {
   setExag(e: number): void {
     if (e === this.exag) return;
     this.exag = e;
-    for (const s of this.sites.values()) s.gy = this.groundY(s.st.x, s.st.z);
+    for (const s of this.sites.values()) s.gy = this.padY(s.st.x, s.st.z, s.st.kind);
     this.markersDirty = true;
     this.lastScale = 0;
   }
@@ -491,6 +491,14 @@ export class SiteLayer {
 
   private groundY(x: number, z: number): number {
     return Math.max(0, this.geo.heightAt(x, z)) * this.exag;
+  }
+
+  /** Höchster Geländepunkt im Footprint (Bodenplatte steht auf Hängen nicht im Gelände) */
+  private padY(x: number, z: number, kind: SiteKind): number {
+    const r = modelOf(kind).radiusM * 0.003;
+    let y = this.groundY(x, z);
+    for (const [dx, dz] of [[r, 0], [-r, 0], [0, r], [0, -r]]) y = Math.max(y, this.groundY(x + dx, z + dz));
+    return y;
   }
 
   private teamMat(owner: string): THREE.MeshLambertMaterial {
@@ -530,14 +538,14 @@ export class SiteLayer {
       }
       for (const o of group.children) o.frustumCulled = false;
       this.object.add(group);
-      s = { key, st: { ...st }, group, body, team, beam, flame, gauge, scaffold: scaff, model, phase: Math.random() * 6.28, gy: this.groundY(st.x, st.z) };
+      s = { key, st: { ...st }, group, body, team, beam, flame, gauge, scaffold: scaff, model, phase: Math.random() * 6.28, gy: this.padY(st.x, st.z, st.kind) };
       this.sites.set(key, s);
       this.markersDirty = true;
       this.lastScale = 0;
     } else {
       const old = s.st;
       if (old.owner !== st.owner) s.team.material = this.teamMat(st.owner);
-      if (old.x !== st.x || old.z !== st.z) s.gy = this.groundY(st.x, st.z);
+      if (old.x !== st.x || old.z !== st.z) s.gy = this.padY(st.x, st.z, st.kind);
       if (old.owner !== st.owner || old.progress !== st.progress || old.x !== st.x || old.z !== st.z || Math.abs(old.health - st.health) > 0.05) this.markersDirty = true;
       Object.assign(old, st);
       this.lastScale = 0;
