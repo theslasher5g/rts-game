@@ -451,7 +451,7 @@ export class UnitPanel {
     const top = el('div', 'up-d-top');
     top.append(el('span', 'up-d-ic', CATEGORY_ICON[t.category] ?? '■'));
     const nm = el('div', 'up-d-name');
-    nm.append(el('b', '', u.name || t.name), el('span', 'muted', ` · ${t.name} · ${t.memberCount > 1 ? `${t.memberCount}× · ` : ''}${CATEGORY_NAMES[t.category] ?? t.category}`));
+    nm.append(el('b', '', u.name || t.name), el('span', 'muted', ` · ${t.name}${t.memberCount > 1 ? ` · ${t.memberCount} Mann` : ''}`));
     top.appendChild(nm);
 
     const grid = el('div', 'up-d-grid');

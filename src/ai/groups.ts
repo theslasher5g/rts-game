@@ -33,24 +33,27 @@ export interface BattleGroup {
   fireX: number;
   fireZ: number;
   fireAt: number;
+  /** Fußtruppen marschieren mit (nur bei nahen Zielen, beim Start festgelegt) */
+  footOk: boolean;
 }
 
 let nextGroupId = 1;
 
 export function newGroup(role: GroupRole, state: GroupState, now: number): BattleGroup {
-  return { id: nextGroupId++, role, state, ids: [], obj: null, since: now, startStrength: 0, wave: 0, targetUnit: 0, lastOrderAt: -99, fireX: 0, fireZ: 0, fireAt: -99 };
+  return { id: nextGroupId++, role, state, ids: [], obj: null, since: now, startStrength: 0, wave: 0, targetUnit: 0, lastOrderAt: -99, fireX: 0, fireZ: 0, fireAt: -99, footOk: false };
 }
 
 export function setState(g: BattleGroup, s: GroupState, now: number): void {
   if (g.state !== s) { g.state = s; g.since = now; g.lastOrderAt = -99; }
 }
 
-/** Mittelpunkt (null bei leerer Gruppe) */
+/** Mittelpunkt (Fahrzeuge bevorzugt: langsame Fußtruppen verfälschen die Lage der Spitze nicht) */
 export function centroid(units: readonly Unit[], out: [number, number]): boolean {
   if (!units.length) return false;
-  let x = 0, z = 0;
-  for (const u of units) { x += u.x; z += u.z; }
-  out[0] = x / units.length; out[1] = z / units.length;
+  let x = 0, z = 0, n = 0;
+  for (const u of units) { if (isFoot(u)) continue; x += u.x; z += u.z; n++; }
+  if (n === 0) { for (const u of units) { x += u.x; z += u.z; } n = units.length; }
+  out[0] = x / n; out[1] = z / n;
   return true;
 }
 

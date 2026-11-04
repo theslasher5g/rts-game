@@ -85,6 +85,8 @@ export class AICommander {
   private readonly air: BattleGroup;
   private readonly naval: BattleGroup;
   private readonly raidPool: BattleGroup;
+  /** Nachschub für die Hauptmacht, solange diese unterwegs ist (kommt als Paket nach) */
+  private readonly reserve: BattleGroup;
   private readonly raids: BattleGroup[] = [];
   private readonly posts = new Map<string, Post>();
   private readonly postOf = new Map<number, string>();
@@ -137,6 +139,7 @@ export class AICommander {
     this.air = newGroup('air', 'idle', now);
     this.naval = newGroup('naval', 'idle', now);
     this.raidPool = newGroup('raid', 'idle', now);
+    this.reserve = newGroup('strike', 'idle', now);
     this.applyPreset();
     this.hook();
   }
@@ -464,13 +467,15 @@ export class AICommander {
 
   /** Neue Einheiten Rollen zuteilen */
   private assign(): void {
-    const groups = [this.defense, this.strike, this.support, this.air, this.naval, this.raidPool, ...this.raids];
+    const groups = [this.defense, this.strike, this.reserve, this.support, this.air, this.naval, this.raidPool, ...this.raids];
     for (const g of groups) this.pruneGroup(g);
     let core = 0;
     for (const u of this.own) if (GROUND_CORE.has(u.type.category) && u.type.damage > 0) core++;
     const P = this.P;
     const frac = this.style === 'defender' ? Math.max(P.defenseFrac, 0.55) : P.defenseFrac;
     const quota = Math.max(P.minDefenders, Math.ceil(core * frac));
+    const sst = this.strike.state;
+    const intake = sst === 'assemble' || sst === 'idle' || sst === 'alert' ? this.strike : this.reserve;
     for (const u of this.own) {
       if (this.groupOf.has(u.id)) continue;
       const t = u.type, cat = t.category;
@@ -479,11 +484,11 @@ export class AICommander {
       if (t.id === 'mortar_team') { this.addTo(this.support, u.id); continue; }
       if (cat === 'helicopter' || cat === 'jet' || cat === 'drone') { if (t.damage > 0) this.addTo(this.air, u.id); continue; }
       if (cat === 'naval') { this.addTo(this.naval, u.id); if (!this.navalHome.has(u.id)) this.navalHome.set(u.id, [u.x, u.z]); continue; }
-      if (cat === 'aa') { this.addTo(t.id === 'sam' || this.defense.ids.length < quota + 2 ? this.defense : this.strike, u.id); continue; }
+      if (cat === 'aa') { this.addTo(t.id === 'sam' || this.defense.ids.length < quota + 2 ? this.defense : intake, u.id); continue; }
       if (t.damage <= 0 || !GROUND_CORE.has(cat)) continue;
-      if (isFoot(u)) { this.addTo(this.defense.ids.length < quota * 1.3 ? this.defense : this.strike, u.id); continue; }
+      if (isFoot(u)) { this.addTo(this.defense.ids.length < quota * 1.3 ? this.defense : intake, u.id); continue; }
       if (P.raidGroups > 0 && isFast(u) && this.raidPool.ids.length + this.raids.reduce((s, r) => s + r.ids.length, 0) < P.raidGroups * 4 && this.style === 'aggressor') { this.addTo(this.raidPool, u.id); continue; }
-      this.addTo(this.defense.ids.length < quota ? this.defense : this.strike, u.id);
+      this.addTo(this.defense.ids.length < quota ? this.defense : intake, u.id);
     }
     // gelegentlich ausgleichen: Überhang der Verteidigung wandert zur Hauptmacht (nur ohne Alarm)
     if (this.time >= this.nextRebalance && !this.alert) {
@@ -492,7 +497,7 @@ export class AICommander {
       for (let i = this.defense.ids.length - 1; i >= 0 && extra > 0; i--) {
         const u = this.ctx.units.get(this.defense.ids[i]);
         if (!u || isFoot(u) || u.type.category === 'aa' || this.postOf.get(u.id)?.startsWith('f')) continue;
-        this.addTo(this.strike, u.id);
+        this.addTo(intake, u.id);
         extra--;
       }
     }
@@ -502,6 +507,7 @@ export class AICommander {
     this.assign();
     this.manageDefense();
     if (this.style === 'defender') this.manageDefenderStrike(); else this.manageStrike();
+    this.manageReserve();
     this.manageSupport();
   }
 
@@ -664,7 +670,9 @@ export class AICommander {
         if (this.objectiveDone(obj)) { this.onObjectiveDone(g, units); break; }
         // Rückzug prüfen
         const local = this.map.enemyNear(this.cen[0], this.cen[1], 6);
-        const weak = strength < g.startStrength * P.retreatFrac;
+        let am = 0, an = 0;
+        for (const u of units) if (!isFoot(u) && u.type.ammo > 0) { am += u.ammo / u.type.ammo; an++; }
+        const weak = strength < g.startStrength * P.retreatFrac || (an > 3 && am / an < 0.12);
         const outgunned = local > 30 && local > strength * P.retreatEnemyRatio;
         if (weak || outgunned) { this.beginRetreat(g, units, obj); break; }
         const dObj = Math.hypot(this.cen[0] - obj.x, this.cen[1] - obj.z);
@@ -698,6 +706,26 @@ export class AICommander {
     }
   }
 
+  /** Reserve: sammelt am Sammelpunkt; schließt als Paket zur Hauptmacht auf (kein tröpfchenweiser Nachschub) */
+  private manageReserve(): void {
+    const r = this.reserve, s = this.strike;
+    if (!r.ids.length) return;
+    const units = this.unitsOf(r, this.tmpB);
+    const idle = this.tmpIds; idle.length = 0;
+    let near = 0;
+    for (const u of units) {
+      if (Math.hypot(u.x - this.staging[0], u.z - this.staging[1]) < 8) near++;
+      else if (u.orders.length === 0) idle.push(u.id);
+    }
+    if (idle.length && this.time - r.lastOrderAt > 0.5 && this.move(idle, this.staging[0] + (this.rnd() - 0.5) * 3, this.staging[1] + (this.rnd() - 0.5) * 3)) r.lastOrderAt = this.time;
+    const mid = s.state === 'advance' || s.state === 'assault';
+    const merge = s.state === 'assemble' || s.state === 'idle' || (mid && near >= Math.max(4, Math.floor(this.P.waveMin / 2)) && near >= units.length * 0.7);
+    if (!merge) return;
+    const add = this.strengthOfGroup(r);
+    for (const id of r.ids.slice()) this.addTo(s, id);
+    if (mid) { s.startStrength += add; s.lastOrderAt = -99; }
+  }
+
   private objKey(o: Objective): string {
     return o.kind === 'field' ? `f${o.id}` : o.kind === 'refinery' ? `r${o.id}` : o.kind === 'hq' ? `h${o.id}` : `p${Math.round(o.x / 4)}_${Math.round(o.z / 4)}`;
   }
@@ -705,6 +733,7 @@ export class AICommander {
   private launch(g: BattleGroup, obj: Objective, units: Unit[], strength: number): void {
     g.obj = obj;
     g.wave++;
+    g.footOk = this.planner.roadKm(this.staging[0], this.staging[1], obj.x, obj.z, this.planner.prof.foot) < 40;
     g.startStrength = strength;
     this.stats.waves++;
     setState(g, 'advance', this.time);
@@ -715,7 +744,7 @@ export class AICommander {
   private driveToObjective(g: BattleGroup, units: Unit[], obj: Objective, force = false): void {
     const fast = this.tmpIds, foot = this.tmpIds2;
     fast.length = 0; foot.length = 0;
-    const footOk = this.planner.roadKm(this.cen[0], this.cen[1], obj.x, obj.z, this.planner.prof.foot) < 40;
+    const footOk = g.footOk;
     for (const u of units) {
       const o = u.orders[0];
       const needs = force || !o || (o.kind !== 'attack' && o.kind !== 'fireAt' && !(o.kind === 'attackMove' && Math.hypot(o.x - obj.x, o.z - obj.z) < 3));
