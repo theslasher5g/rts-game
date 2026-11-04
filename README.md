@@ -126,6 +126,23 @@ anderen Weg, einen Krieg auszulösen.
 - **Brücken:** Pioniere legen Sprengladungen, ziehen sich zurück und sprengen. Die Kante im Wegenetz wird gesperrt, die
   Wegfindung weicht aus. Reparatur ist möglich.
 
+## Was Phase 6 enthält
+
+- **KI-Befehlshaber:** Kronland überfällt Tankwagen-Konvois, nimmt Ölfelder, sprengt Brücken auf deinen Versorgungsrouten, belagert Raffinerie
+  und Hauptquartier, greift in Wellen an und zieht sich zurück, wenn es zu schwach ist. Marenia verteidigt als Verbündeter.
+  Drei Stufen (leicht, mittel, schwer) mit unterschiedlicher Reaktionszeit, Wellengröße und Fähigkeiten. Die KI hat dieselbe Wirtschaft
+  wie du und keine Gratis-Einheiten.
+- **Missionen:** Sieg und Niederlage mit Endbildschirm (Bilanz: Verluste, Fässer, Felder, Konvois, Brücken, zivile Opfer), Kampagne mit
+  7 Missionen („Erste Fässer“ bis „Entscheidung“) und freies Gefecht (Raffinerie und HQ des Gegners zerstören). Fortschritt wird im
+  Browser gespeichert.
+- **Anleitung:** Die erste Mission führt in 13 Schritten durch Auswahl, Befehle, Bauen, Ölfluss, Produktion und Kamera.
+- **Nebel des Krieges:** Gegner siehst du nur, wenn eigene oder verbündete Einheiten sie sehen. Sichtlinien über Gelände und Rauch,
+  Höhenbonus, Gelände und Minikarte werden dunkel (unerkundet) oder gedämpft (bekannt). In den Einstellungen abschaltbar.
+- **Bedienung:** Jedes Fahrzeug ist ein eigener Verband (Infanterie bleibt in Trupps). Größerer Klickbereich mit Hervorhebung unter dem
+  Mauszeiger. Die Befehlsknöpfe zeigen nur, was die Auswahl kann: Bauen, Sprengen und Reparieren nur für Pioniere, Gebäude besetzen nur
+  für Infanterie.
+- **Effekte:** Raketenspur und Einschlag kommen auch bei Zeitraffer gleichzeitig an.
+
 ## Detail-Update (Phase 5b)
 
 - **Fahrzeuge:** Kampfpanzer, Schützenpanzer, Haubitzen, Raketenwerfer, Flugabwehr und LKW mit etwa dreimal so vielen Details.
@@ -216,8 +233,8 @@ server-autoritativ (Multiplayer) angebunden werden können.
 3. ✅ Kampfsystem, Effekte, Deckung, Gebäude, Gräben, Brücken sprengen
 4. ✅ Zivilisten und Schutzstatus
 5. ✅ Kleine Karte, Öl-Wirtschaft, Nachschub und Produktion
-6. Darstellung an die kleine Karte anpassen (Gelände, Zoom, Symbole), Missionsziele, Kampagne (7 Missionen)
-7. KI-Befehlshaber (Angriff, Verteidigung, Konvoi-Überfälle, Brückensprengung)
+6. ✅ Missionen, Kampagne, Anleitung, Nebel des Krieges, KI-Befehlshaber
+7. Spielbalance und Qualitätsstufen (Leistung), Zufallskarten, Speichern und Laden
 8. Wetter, Jahreszeiten und Tageszeit
 9. Multiplayer
 10. Forschung, Drohnen, Balancing, Feinschliff
