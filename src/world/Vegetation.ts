@@ -345,7 +345,7 @@ export class Vegetation {
     const wood = sstep(0.64, 0.8, vnoise(x / 3.2 + 40, z / 3.2 + 40, 9)) * (1 - dry) * 0.85 * (1 - sstep(0.9, 1.4, hk));
     d = Math.max(d, wood);
     // Mittelmeer/Trockengebiete: lichtes Gehölz
-    const scrub = dry * sstep(0.45, 0.75, vnoise(x / 1.8, z / 1.8, 10)) * 0.4 * (1 - sstep(0.1, 0.3, dry) * 0.0);
+    const scrub = dry * sstep(0.45, 0.75, vnoise(x / 1.8, z / 1.8, 10)) * 0.22 * (1 - sstep(0.1, 0.3, dry) * 0.0);
     d = Math.max(d, scrub * (1 - sstep(0.7, 1.0, dry) * 0.6));
     // Baumgrenze (nach Norden niedriger)
     const tl = 0.45 + (2.1 - 0.45) * sstep(0.05, 0.75, lat);
@@ -540,7 +540,7 @@ export class Vegetation {
         const hk = g.heightAt(x, z);
         if (hk <= 0.003) continue;
         const d = this.density(x, z, false);
-        if (d < 0.04 || r0 > d * 1.15) continue;
+        if (d < 0.04 || r0 > d * 1.6) continue;
         // Hang
         const gx = (g.heightAt(x + 0.8, z) - g.heightAt(x - 0.8, z)) / 1.6, gz = (g.heightAt(x, z + 0.8) - g.heightAt(x, z - 0.8)) / 1.6;
         if (Math.hypot(gx, gz) > 0.5 && ihash(gi, gj, 3) < sstep(0.3, 0.65, Math.hypot(gx, gz))) continue;

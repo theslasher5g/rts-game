@@ -433,7 +433,8 @@ void main() {
     float dirt = smoothstep(0.7, 0.9, noiseL(wxz / 0.6 + 11.0)) * (1.0 - forest) * (1.0 - snow);
     col = mix(col, srgb(vec3(0.42, 0.34, 0.24)), dtl * dirt * 0.35);
     // Felsschichtung an Hängen
-    float strata = 0.5 + 0.5 * sin(hk * 220.0 + nMid * 5.0);
+    float sph = hk * 220.0 + nMid * 5.0;
+    float strata = mix(0.5 + 0.5 * sin(sph), 0.5, smoothstep(0.25, 0.8, fwidth(sph)));
     col *= mix(1.0, 0.82 + 0.3 * strata, rock * dtl);
     // Getrockneter Schlamm (Süden): Risse entlang von Rauschkonturen
     float crack = 1.0 - smoothstep(0.0, 0.03 + 0.2 * fa, abs(noiseL(wxz / 0.35 + 5.0) - 0.5));

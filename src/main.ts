@@ -37,6 +37,7 @@ import { MainMenu } from './ui/MainMenu';
 import { Minimap } from './ui/Minimap';
 import { SettingsPanel, loadSettings } from './ui/SettingsPanel';
 import { Cities } from './world/Cities';
+import { WorldDetail } from './world/WorldDetail';
 import { GeoData } from './world/GeoData';
 import { Picker } from './world/Picker';
 import { Terrain } from './world/Terrain';
@@ -58,6 +59,8 @@ async function boot() {
   const terrain = new Terrain(geo, settings);
   const water = new Water(geo, settings, terrain.heightTexture);
   const cities = new Cities(geo, settings);
+  const worldDetail = new WorldDetail(geo, settings, cities, graph);
+  gfx.scene.add(worldDetail.object);
   const roads = new RoadRenderer(geo, graph, settings);
   gfx.scene.add(terrain.object, water.object, roads.object, cities.object);
 
@@ -97,6 +100,9 @@ async function boot() {
   const occupation = new Occupation({ civil, units, war });
   const civilPanel = new CivilPanel(uiRoot, civil, reputation, playerOf);
   civilPanel.setOccupation(occupation);
+  // Panel startet zugeklappt; der Umschalter erscheint erst im Spiel
+  const civilToggle = uiRoot.querySelector('.cv-toggle') as HTMLElement | null;
+  if (civilToggle) civilToggle.style.display = 'none';
   units.roadSpeedFactor = (x, z) => civil.speedFactorAt(x, z);
   ctl.cc.services = { combat, structures, cities, war, protection };
   const unlockAudio = () => sfx.resume();
@@ -128,6 +134,7 @@ async function boot() {
     unitRenderer.applySettings(s);
     structures.applySettings(s);
     civil.applySettings(s);
+    worldDetail.applySettings(s);
     bridges.applySettings(s);
     effects.applySettings(s);
     combat.applySettings(s);
@@ -156,7 +163,7 @@ async function boot() {
     ctl.playerA3 = countryA3;
     ctl.enabled = true;
     unitPanel.show();
-    civilPanel.show();
+    if (civilToggle) civilToggle.style.display = '';
     for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
     if (c) rts.focus(c.label[0], c.label[1], Math.min(2200, Math.max(500, Math.sqrt(c.cells * 4) * 2.2)));
   });
@@ -225,6 +232,7 @@ async function boot() {
     terrain.update(rts.camera, time);
     water.update(rts.camera, time);
     cities.update(rts.camera);
+    worldDetail.update(rts.camera, time);
     roads.update(rts.camera);
     bridges.update(rts.camera);
     unitRenderer.update(rts.camera, time, state.playerA3);
@@ -247,7 +255,7 @@ async function boot() {
   requestAnimationFrame(frame);
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail };
 }
 
 boot().catch((err: unknown) => {

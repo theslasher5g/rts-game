@@ -3,9 +3,9 @@
 Browserbasiertes 3D-Echtzeit-Strategiespiel: Grand Strategy (Wirtschaft, Handel, Politik) trifft taktisches RTS
 im Retro-Look der PS2-Ära. Läuft komplett im Browser, ohne Installation.
 
-> **Stand: Phase 3 – Kampf.** Zusätzlich zu Phase 1 (3D-Karte, Kamera, Länderauswahl, PS2-Look) und Phase 2 (Straßennetz,
-> Einheiten, Befehle): Kampfsystem mit Effekten, Deckung für Infanterie, Gebäude besetzen, Gräben und Befestigungen,
-> Brücken sprengen und reparieren.
+> **Stand: Phase 4 – Zivilisten und detailliertere Assets.** Zusätzlich zu Phase 1–3 (Karte, Straßennetz, Einheiten, Kampf,
+> Deckung, Bauwerke): Zivilisten in Städten, Schutzstatus mit Kriegsverbrechen und Ansehen, Evakuierung, Besatzung sowie
+> deutlich detailliertere Einheiten, Städte, Wälder und Dörfer.
 
 ## Schnellstart
 
@@ -126,6 +126,26 @@ anderen Weg, einen Krieg auszulösen.
 - **Brücken:** Pioniere legen Sprengladungen, ziehen sich zurück und sprengen. Die Kante im Wegenetz wird gesperrt, die
   Wegfindung weicht aus. Reparatur ist möglich.
 
+## Was Phase 4 enthält
+
+- **Zivilisten:** Alle 172 Städte haben Einwohner, Zufriedenheit, Verluste und Zerstörungsgrad. Auf den Straßen fährt ziviler
+  Verkehr, in Städten laufen Passanten (nur in Kameranähe simuliert, sonst gerechnet). Geschützte Infrastruktur:
+  Krankenhäuser, Schulen, Kraftwerke, Wasserwerke und Häfen mit sichtbarem Schutzzeichen.
+- **Schutzstatus:** Eigene und verbündete Städte können nicht beschossen oder bombardiert werden (Artillerie, Luftschläge,
+  Bomben, Drohnen); direkter Beschuss zur Verteidigung bleibt erlaubt. Ein Feuerbefehl auf feindliche Städte verlangt eine
+  Bestätigung mit Warnung, ein gezielter Angriff gilt als Kriegsverbrechen.
+- **Ansehen:** Kriegsverbrechen, Kollateralschäden, Beschuss geschützter Infrastruktur und Missbrauch von Zivilisten als
+  Schutzschild senken das internationale Ansehen und die Zufriedenheit zu Hause und radikalisieren die Opfer. Hilfslieferungen
+  verbessern sie. Die Werte für Handel (Phase 6) und Bündnisse (Phase 7) sind schon vorbereitet.
+- **Evakuierung:** Städte lassen sich im Panel „Bevölkerung“ evakuieren. Flüchtlinge fahren oder gehen auf den Straßen zu einer
+  Aufnahmestadt und bremsen dort die eigenen Truppen. Gesprengte Brücken und Beschuss treffen die Kolonnen.
+- **Besatzung:** Besetzte Städte brauchen eine Garnison, sonst steigt die Unruhe bis zum Aufstand.
+- **Neue Einheiten:** Hilfskonvoi, Feldlazarett und Krankenwagen.
+- **Detailliertere Einheiten:** rund zehnmal mehr Dreiecke, Tarnmuster, Laufwerke, Türme und Waffen. Kampfpanzer gibt es in
+  westlicher, russischer und Standard-Variante.
+- **Detailliertere Welt:** Städte mit Altstadt, Plattenbauten, Industrie, Hochhauskern, Parks und Fenstern; Wälder und
+  Bäume, Dörfer mit Feldern, Feldparzellen, Hecken und Gesteinsschichten im Nahbereich des Geländes.
+
 ## Projektstruktur
 
 ```
@@ -145,6 +165,8 @@ src/
   tactics/                  Deckungssystem, Infanterie-KI
   structures/               Befestigungen, Gebäude-Besetzung, Brücken
   fx/, audio/               Partikel, Wracks, Kamerawackeln, Geräusche
+  civil/                    Zivilisten, Infrastruktur, Schutzstatus, Besatzung
+  world/                    Karte, Städte, Wälder (Vegetation), Dörfer (Villages)
   game/                     Spielzustand, Länder-Startprofile
   ui/                       Hauptmenü, HUD, Minikarte, Labels, Einstellungen
 ```
@@ -158,7 +180,7 @@ server-autoritativ (Multiplayer) angebunden werden können.
 1. ✅ Grundgerüst: Karte, Kamera, Länderauswahl, PS2-Shader
 2. ✅ Straßennetz als Navigationsgraph, Einheiten, Auswahl, Formationen
 3. ✅ Kampfsystem, Effekte, Deckung, Gebäude, Gräben, Brücken sprengen
-4. Zivilisten und Schutzstatus
+4. ✅ Zivilisten und Schutzstatus
 5. Ressourcen, Zufriedenheit, Logistik, Produktion
 6. Handelssystem
 7. Politik und Allianzen

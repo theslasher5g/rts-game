@@ -193,12 +193,12 @@ export class Villages {
     if (forestMask(g, x, z) > 0.9 && ihash(ci, cj, 6) < 0.7) return null;
 
     const rnd = (s: number) => ihash(ci, cj, 100 + s);
-    const n = 5 + Math.floor(55 * Math.pow(rnd(0), 2.6));
+    const n = 6 + Math.floor(54 * Math.pow(rnd(0), 1.9));
     const style = MED.has(a3) ? 2 : NORDIC.has(a3) || lat < 0.12 ? 3 : 0;
     const walls = style === 2 ? WALL_MED : style === 3 ? WALL_NORDIC : WALL_WEST;
     const roofs = style === 2 ? ROOF_MED : style === 3 ? ROOF_NORDIC : ROOF_WEST;
     const ca = Math.cos(theta), sa = Math.sin(theta);
-    const L = Math.ceil(n / 2) * 0.03;
+    const L = Math.ceil(n / 2) * 0.062;
     const data: number[] = [], typ: number[] = [], roof: number[] = [];
     const fields: Field[] = [];
     let k = 0;
@@ -220,21 +220,21 @@ export class Villages {
         if (side === 0 ? false : q >= n - per) break;
         k++;
         const a = (q + 0.5) * (L / per) - L / 2 + (rnd(10 + k) - 0.5) * 0.008;
-        const b = (side === 0 ? -1 : 1) * (0.024 + rnd(20 + k) * 0.01);
+        const b = (side === 0 ? -1 : 1) * (0.044 + rnd(20 + k) * 0.014);
         const r = rnd(30 + k);
-        const w = 0.018 + r * 0.011, d = 0.015 + rnd(50 + k) * 0.006, h = 0.0075 + rnd(60 + k) * 0.004;
+        const w = 0.04 + r * 0.02, d = 0.032 + rnd(50 + k) * 0.01, h = 0.012 + rnd(60 + k) * 0.006;
         const wc = rnd(70 + k) < 0.55 ? wallBase : pick(walls, rnd(80 + k));
         const rc = rnd(90 + k) < 0.7 ? roofBase : pick(roofs, rnd(95 + k));
         put(a, b, w, h, d, side === 0 ? 0 : Math.PI, style === 2 ? BT.HIP : rnd(100 + k) < 0.75 ? BT.OLD : BT.VILLA, wc, rc);
       }
     }
     // Kirche (größere Dörfer) und Scheunen
-    if (n >= 22) put((rnd(3) - 0.5) * L * 0.4, 0.062, 0.048, 0.05, 0.024, Math.PI, BT.CHURCH, pick(WALL_WEST, rnd(4)), 0x5a5d62);
+    if (n >= 22) put((rnd(3) - 0.5) * L * 0.4, 0.09, 0.075, 0.07, 0.036, Math.PI, BT.CHURCH, pick(WALL_WEST, rnd(4)), 0x5a5d62);
     const barns = Math.floor(n / 9) + (n > 8 ? 1 : 0);
     for (let q = 0; q < barns; q++) {
       const a = (rnd(110 + q) - 0.5) * L;
       const side = q % 2 === 0 ? 1 : -1;
-      put(a, side * (0.062 + rnd(120 + q) * 0.012), 0.03 + rnd(130 + q) * 0.01, 0.0095, 0.019, side > 0 ? Math.PI : 0, BT.BARN, pick([0x8a5a3c, 0x9a6a44, 0x7a5a40, 0xa89070], rnd(140 + q)), pick([0x6a4a3a, 0x7a3a2e, 0x5a5a5e], rnd(145 + q)));
+      put(a, side * (0.095 + rnd(120 + q) * 0.015), 0.05 + rnd(130 + q) * 0.015, 0.013, 0.03, side > 0 ? Math.PI : 0, BT.BARN, pick([0x8a5a3c, 0x9a6a44, 0x7a5a40, 0xa89070], rnd(140 + q)), pick([0x6a4a3a, 0x7a3a2e, 0x5a5a5e], rnd(145 + q)));
     }
     // Felder
     const nf = 2 + Math.floor(n / 9) + Math.floor(rnd(150) * 3);
@@ -242,7 +242,7 @@ export class Villages {
       const side = q % 2 === 0 ? 1 : -1;
       const w = 0.12 + rnd(160 + q) * 0.18, d = 0.09 + rnd(170 + q) * 0.13;
       const a = (rnd(180 + q) - 0.5) * (L + 0.3);
-      const b = side * (0.13 + d / 2 + rnd(190 + q) * 0.12);
+      const b = side * (0.16 + d / 2 + rnd(190 + q) * 0.12);
       const wx = x + a * ca + b * sa, wz = z - a * sa + b * ca;
       if (this.waterAt(wx, wz) || this.waterAt(wx + w * 0.4 * ca, wz - w * 0.4 * sa)) continue;
       const heights = new Float32Array(5 * 5);
