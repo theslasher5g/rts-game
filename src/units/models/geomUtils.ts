@@ -19,6 +19,10 @@ export type V3 = [number, number, number];
 export const P_FIXED = 0;
 export const P_CAMO = 1;
 export const P_TEAM = 2;
+/** Hautton (Soldaten-Material: Variation je Instanz) */
+export const P_SKIN = 3;
+/** Ausrüstungsfarbe (Weste/Taschen, je Nation getönt) */
+export const P_GEAR = 4;
 
 export interface ModelDef {
   geom: THREE.BufferGeometry;
@@ -32,7 +36,42 @@ export interface ModelDef {
   livery: 'ground' | 'air' | 'naval' | 'heli';
   /** Neigung am Hang */
   tilt: boolean;
+  /** animiertes Modell (aPart/aPivot-Attribute, Anim-Material mit Vertex-Shader-Animation) */
+  anim?: 'soldier' | 'air' | 'naval';
+  /** Low-Detail-Variante (gleiche Part-IDs), wird ab größerem Kameraabstand genutzt */
+  lod?: ModelDef;
+  /** Fahrzeug-Animation (Turm, Rohr, Rückstoß, Räder, Ketten, Radar) – nur Bodenfahrzeuge (aVPart-Attribut) */
+  vanim?: AnimSpec;
+  /** Low-Detail-Geometrie des Fahrzeugs (≈25 % Dreiecke) für große Kameraabstände */
+  vlod?: THREE.BufferGeometry;
 }
+
+/** Animationsparameter eines Fahrzeugmodells (Einheiten: m, rad, s) */
+export interface AnimSpec {
+  /** Turm-Drehgeschwindigkeit rad/s (0 = kein Turm) */
+  turretRate: number;
+  /** Rohr-Hubgeschwindigkeit rad/s */
+  elevRate: number;
+  /** Rohrerhöhung: direct = Panzer/IFV, indirect = Haubitze (nach Entfernung), launcher = Raketen (hoch beim Feuern), sam = steil bei Gefecht, aa = Flak */
+  elevMode: 'none' | 'direct' | 'indirect' | 'launcher' | 'sam' | 'aa';
+  /** Ruhe-/Marschstellung und maximale Erhöhung (rad) */
+  elevRest: number;
+  elevMax: number;
+  /** Rohrrücklauf (m) */
+  recoil: number;
+  /** Radar-Drehgeschwindigkeit rad/s (0 = keiner) */
+  radarRate: number;
+  /** Federungsamplitude (m) */
+  bob: number;
+}
+
+/** Teil-Arten für die Fahrzeug-GPU-Animation (aVPart.x) */
+export const K_STATIC = 0;
+export const K_TURRET = 1;
+export const K_GUN = 2;
+export const K_WHEEL = 3;
+export const K_RADAR = 4;
+export const K_TRACK = 5;
 
 /** Erkennungsfarben */
 export const DARK = 0x2c2c28;
@@ -97,8 +136,17 @@ function vnoise(x: number, y: number, z: number): number {
     sz,
   );
 }
+/** Tarnmuster-Variante 0..2 (nur beim Bauen; verschiebt Rauschen und Schwellen) */
+let camoVariant = 0;
+export function setCamoVariant(v: number): void {
+  camoVariant = v;
+}
 /** Tarn-Tonwert 0..1 an einem Modellpunkt */
 export function camoNoise(x: number, y: number, z: number): number {
+  if (camoVariant) {
+    x += camoVariant * 5.7;
+    z += camoVariant * 3.3 + y * 0.2;
+  }
   return vnoise(x * 0.55 + 11, y * 1.3, z * 0.55) * 0.65 + vnoise(x * 1.3, y * 2.4 + 5, z * 1.3) * 0.35;
 }
 
@@ -152,6 +200,17 @@ export class ModelBuilder {
   readonly pos: number[] = [];
   readonly col: number[] = [];
   readonly pnt: number[] = [];
+  /** Animations-Teil-ID und Drehpunkt (Modellraum) je Vertex – Vertex-Shader-Animation */
+  readonly prt: number[] = [];
+  readonly pvt: number[] = [];
+  private curPart = 0;
+  /** Fahrzeug-Animation: je Vertex (Art, Pivot y, Pivot z, Zusatz) */
+  readonly vprt: number[] = [];
+  private curV: [number, number, number, number] = [0, 0, 0, 0];
+  usesV = false;
+  /** Low-Detail-Bau: Modellfunktionen lassen Feinteile weg */
+  lo = false;
+  private curPivot: V3 = [0, 0, 0];
   private stack: THREE.Matrix4[] = [new THREE.Matrix4()];
 
   get tris(): number {
@@ -199,7 +258,49 @@ export class ModelBuilder {
     for (let i = 0; i < 3; i++) {
       this.col.push(color[0] * g * aos[i], color[1] * g * aos[i], color[2] * g * aos[i]);
       this.pnt.push(paint);
+      this.prt.push(this.curPart);
+      this.pvt.push(this.curPivot[0], this.curPivot[1], this.curPivot[2]);
+      this.vprt.push(this.curV[0], this.curV[1], this.curV[2], this.curV[3]);
     }
+  }
+
+  /**
+   * Fahrzeug-Animation: folgende Teile gehören zur Gruppe `kind` (K_*), bis vpart(K_STATIC).
+   * (y, z) = Drehpunkt im aktuellen Koordinatensystem; w: Turm/Rohr/Radar = Turmachse (z), Rad = Radius,
+   * Kette = Mittelhöhe des Laufbands (nur y). Im Low-Detail-Bau bleiben Räder/Ketten statisch.
+   */
+  vpart(kind: number, y = 0, z = 0, w = 0): this {
+    if (kind === K_STATIC || (this.lo && (kind === K_WHEEL || kind === K_TRACK))) {
+      this.curV = [0, 0, 0, 0];
+      return this;
+    }
+    const m = this.stack[this.stack.length - 1];
+    _v.set(0, y, z).applyMatrix4(m);
+    const py = _v.y, pz = _v.z;
+    let tz: number;
+    if (kind === K_WHEEL) {
+      _v.setFromMatrixScale(m);
+      tz = w * _v.y;
+    } else tz = _v.set(0, 0, w).applyMatrix4(m).z;
+    this.curV = [kind, py, pz, tz];
+    this.usesV = true;
+    return this;
+  }
+
+  /**
+   * Alle Teile in fn gehören zur Animationsgruppe `id` mit Drehpunkt `pivot` (lokal, wird mit dem aktuellen
+   * Transformstack ins Modell übertragen -> vor mirror() aufrufen bzw. innerhalb, dann wird der Pivot gespiegelt).
+   */
+  part(id: number, pivot: V3, fn: () => void): this {
+    const m = this.stack[this.stack.length - 1];
+    _v.set(pivot[0], pivot[1], pivot[2]).applyMatrix4(m);
+    const prevId = this.curPart, prevPv = this.curPivot;
+    this.curPart = id;
+    this.curPivot = [_v.x, _v.y, _v.z];
+    fn();
+    this.curPart = prevId;
+    this.curPivot = prevPv;
+    return this;
   }
 
   /** Flächen (CCW nach außen) ausgeben, optional Tarnzellen */
@@ -236,7 +337,9 @@ export class ModelBuilder {
               const a = pt(i / nu, j / nv), b = pt((i + 1) / nu, j / nv), c = pt((i + 1) / nu, (j + 1) / nv), d = pt(i / nu, (j + 1) / nv);
               const cx = (a[0] + c[0]) / 2, cy = (a[1] + c[1]) / 2, cz = (a[2] + c[2]) / 2;
               const t = camoNoise(cx, cy, cz);
-              const tone = t < 0.36 ? TONE_DARK : t > 0.66 ? TONE_BROWN : t > 0.58 ? TONE_LIGHT : TONE_BASE;
+              const lo = camoVariant === 1 ? 0.3 : camoVariant === 2 ? 0.44 : 0.36;
+              const hi = camoVariant === 1 ? 0.56 : camoVariant === 2 ? 0.7 : 0.66;
+              const tone = t < lo ? TONE_DARK : t > hi ? (camoVariant === 2 ? TONE_LIGHT : TONE_BROWN) : t > hi - 0.08 ? (camoVariant === 1 ? TONE_BROWN : TONE_LIGHT) : TONE_BASE;
               const cc: V3 = [base[0] * tone[0], base[1] * tone[1], base[2] * tone[2]];
               const ao = (y: number) => aoAt(y, ny);
               this.emit(a, b, c, cc, paint, ao(a[1]), ao(b[1]), ao(c[1]), grain);
@@ -495,11 +598,16 @@ export function mergeParts(parts: ModelBuilder[], opts: { groundAO?: number; gro
   const pos = new Float32Array(total);
   const col = new Float32Array(total);
   const pnt = new Float32Array(total / 3);
-  let o = 0, po = 0;
+  const prt = new Float32Array(total / 3);
+  const pvt = new Float32Array(total);
+  let o = 0, po = 0, anyPart = false;
   for (const p of parts) {
     pos.set(p.pos, o);
     col.set(p.col, o);
     pnt.set(p.pnt, po);
+    prt.set(p.prt, po);
+    pvt.set(p.pvt, o);
+    for (const id of p.prt) if (id !== 0) anyPart = true;
     o += p.pos.length;
     po += p.pnt.length;
   }
@@ -518,6 +626,19 @@ export function mergeParts(parts: ModelBuilder[], opts: { groundAO?: number; gro
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.setAttribute('aPaint', new THREE.BufferAttribute(pnt, 1));
+  if (parts.some((p) => p.usesV)) {
+    const vp = new Float32Array((total / 3) * 4);
+    let k = 0;
+    for (const p of parts) {
+      vp.set(p.vprt, k);
+      k += p.vprt.length;
+    }
+    g.setAttribute('aVPart', new THREE.BufferAttribute(vp, 4));
+  }
+  if (anyPart) {
+    g.setAttribute('aPart', new THREE.BufferAttribute(prt, 1));
+    g.setAttribute('aPivot', new THREE.BufferAttribute(pvt, 3));
+  }
   g.computeVertexNormals(); // nicht indiziert -> Flächennormalen (flach)
   g.computeBoundingSphere();
   return g;
@@ -525,4 +646,37 @@ export function mergeParts(parts: ModelBuilder[], opts: { groundAO?: number; gro
 
 export function triCount(g: THREE.BufferGeometry): number {
   return g.getAttribute('position').count / 3;
+}
+
+
+/**
+ * Fahrzeugmodell in Hoch-/Niedrigdetail bauen, je 3 Tarnvarianten (Vertexfarben in `color`, `aCol1`, `aCol2`).
+ * make(b, lo) muss deterministisch sein (gleiche Geometrie, nur andere Tarnzellenfarben).
+ */
+export function buildVehicleGeoms(
+  make: (b: ModelBuilder, lo: boolean) => void,
+  opts: { groundAO?: number; groundH?: number } = {},
+): { geom: THREE.BufferGeometry; lo: THREE.BufferGeometry } {
+  const out: THREE.BufferGeometry[] = [];
+  for (const lo of [false, true]) {
+    let base: THREE.BufferGeometry | null = null;
+    for (let v = 0; v < 3; v++) {
+      setCamoVariant(v);
+      const b = new ModelBuilder();
+      b.lo = lo;
+      make(b, lo);
+      const g = mergeParts([b], opts);
+      if (!base) base = g;
+      else {
+        const c = g.getAttribute('color') as THREE.BufferAttribute;
+        const bc = base.getAttribute('color') as THREE.BufferAttribute;
+        base.setAttribute(v === 1 ? 'aCol1' : 'aCol2', c.count === bc.count ? c : bc);
+        g.dispose();
+      }
+    }
+    setCamoVariant(0);
+    base!.deleteAttribute('normal');
+    out.push(base!);
+  }
+  return { geom: out[0], lo: out[1] };
 }

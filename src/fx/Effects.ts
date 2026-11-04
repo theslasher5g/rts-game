@@ -18,6 +18,9 @@ import type { Settings } from '../core/types';
 import type { ExplosionSize, ImpactSurface, SmokeQuery, WeaponKind } from '../combat/types';
 import type { Unit } from '../units/types';
 import type { GeoData } from '../world/GeoData';
+import { terrainHeightKm } from '../world/Cities';
+import { SUN_DIR } from '../world/Terrain';
+import { CraterLayer } from './craters';
 import { DECAL_FRAG, DECAL_VERT, PARTICLE_FRAG, PARTICLE_VERT, RIBBON_FRAG, RIBBON_VERT } from './shaders';
 
 // ---------------------------------------------------------------- Tuning
@@ -28,7 +31,14 @@ const VIS_MAX = 600;
 const EFFECT_SC = 0.85;
 const PARTICLE_CAP = 24000;
 const SPAWN_BUDGET = 7000; // Partikel pro Frame (Notbremse)
-const DECAL_CAP = 2000;
+const DECAL_CAP = 3200;
+/** Kraterschalen sichtbar bis zu diesem Kameraabstand (km); darüber nur flache Dunkelscheiben (Decal) */
+const BOWL_MAX_DIST = 75;
+/** Kraterradius in Metern je Waffe (Einschlag am Boden). 0/fehlend = kein Krater (Kleinwaffen, Flak, SAM, Torpedo) */
+const CRATER_M: Partial<Record<WeaponKind, number>> = {
+  grenade: 1.0, rpg: 1.1, atgm: 1.6, heli_atgm: 1.6, fpv: 1.7, tank_gun: 1.3, autocannon: 0, heli_rocket: 2.4, air_missile: 2.6,
+  mortar: 2.2, naval_gun: 3.6, howitzer: 5.2, rocket_arty: 4.6, antiship_missile: 6.5, bomb: 12, demo_charge: 4,
+};
 const RING_CAP = 192;
 const RIBBON_CAP = 768;
 const PROJ_CAP = 320;
@@ -60,6 +70,8 @@ const X_DEBRIS = [3, 6, 12, 20, 34];
 const X_SPARK = [6, 12, 20, 30, 46];
 const X_RING = [5, 11, 22, 40, 80];
 const X_CRATER = [1.8, 3.5, 6, 10, 19];
+/** Kraterradius (m) der 3D-Schale je Explosionsgröße */
+const X_CRATER_R = [0, 2, 5.5, 10, 20];
 const X_COLUMN = [6, 20, 45, 90, 180]; // s
 const X_SHAKE = [0.04, 0.1, 0.22, 0.45, 0.9];
 const X_CLOUD_R = [0, 0.008, 0.02, 0.035, 0.06]; // km
@@ -725,12 +737,21 @@ export class Effects {
 
   private readonly particles = new Particles();
   private readonly craters: DecalLayer;
+  private readonly bowls: CraterLayer;
+  private roadQuery: ((x: number, z: number) => boolean) | null = null;
+  private bowlsOn = false;
+  private readonly bowlLift: THREE.IUniform = { value: 0.004 };
+  private readonly recentX = new Float32Array(8);
+  private readonly recentZ = new Float32Array(8);
+  private readonly recentT = new Float32Array(8).fill(-9);
+  private recentH = 0;
   private readonly rings: DecalLayer;
   private readonly ribbons = new RibbonLayer();
   private readonly decalUniforms: Record<string, THREE.IUniform> = {
     uVis: { value: VIS_MIN },
     uTime: { value: 0 },
     uLift: { value: 0.002 },
+    uBowl: { value: 0 },
   };
 
   // Projektile
@@ -819,6 +840,7 @@ export class Effects {
     this.craters = new DecalLayer(DECAL_CAP, 2, this.decalUniforms);
     this.rings = new DecalLayer(RING_CAP, 3, this.decalUniforms);
     this.craters.mesh.name = 'FxCraters';
+    this.bowls = new CraterLayer({ uVis: this.decalUniforms.uVis, uTime: this.decalUniforms.uTime, uLift: this.bowlLift }, SUN_DIR);
     this.rings.mesh.name = 'FxRings';
 
     // Trümmer-InstancedMesh
@@ -851,7 +873,7 @@ export class Effects {
 
     for (let i = 0; i < EMITTER_CAP; i++) this.em.push({ on: false, kind: 0, x: 0, y: 0, z: 0, age: 0, dur: 0, rate: 0, rad: 1, size: 1, acc: 0, flameDur: 0 });
 
-    this.object.add(this.craters.mesh, this.rings.mesh, this.debris, this.particles.mesh, this.ribbons.mesh);
+    this.object.add(this.craters.mesh, this.bowls.mesh, this.rings.mesh, this.debris, this.particles.mesh, this.ribbons.mesh);
 
     this.subscribe();
   }
@@ -867,7 +889,12 @@ export class Effects {
 
   // ------------------------------------------------------------ Hilfen
   private ground(x: number, z: number): number {
-    return Math.max(0, this.geo.heightAt(x, z)) * this.exag;
+    return Math.max(0, terrainHeightKm(this.geo, x, z)) * this.exag;
+  }
+
+  /** Hook für die Straßenabfrage (Asphaltkrater): (x,z) -> liegt auf Straße/Brücke */
+  setRoadQuery(fn: ((x: number, z: number) => boolean) | null): void {
+    this.roadQuery = fn;
   }
 
   private isWater(x: number, z: number): boolean {
@@ -1268,8 +1295,56 @@ export class Effects {
     for (let i = 0; i < n; i++) this.sparkP(ox, oy, oz, lx, ly, lz, rr(-1, 1) * sp, rr(0.5, 1) * sp, rr(-1, 1) * sp, 0.3, rr(0.3, 0.7));
   }
 
+  // ---- Krater
+  /** Kraterschale + flache Dunkelscheibe (Fern-LOD) + Brocken, die liegen bleiben. Radius in Metern. */
+  private makeCrater(x: number, z: number, radiusM: number, hot: number): void {
+    if (radiusM < 0.5 || this.isWater(x, z)) return;
+    const gy = this.ground(x, z);
+    const gx = this.slopeX(x, z), gz = this.slopeZ(x, z);
+    const steep = Math.hypot(gx, gz);
+    if (steep > 0.55) radiusM *= 0.7; // steiler Hang / Fels: kleiner
+    const road = this.roadQuery ? this.roadQuery(x, z) : false;
+    const depth = clamp(0.85 + radiusM * 0.012, 0.85, 1.1) * rr(0.9, 1.1);
+    this.bowls.add(x, gy, z, gx, gz, radiusM, depth, hot, road ? 1 : 0, this.clock);
+    this.craters.add(x, gy, z, gx, gz, radiusM * 1.02 * 1.7, 0, 1, this.clock, 1e9);
+    const h = this.recentH;
+    this.recentH = (h + 1) & 7;
+    this.recentX[h] = x; this.recentZ[h] = z; this.recentT[h] = this.clock;
+    // Brocken, die als kleine dunkle Punkte um den Krater liegen bleiben
+    if (this.camDist < BOWL_MAX_DIST && this.inView(x, gy, z, 0.05)) {
+      const n = Math.min(7, this.count(2 + radiusM * 0.9, 1));
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * 6.283, hs = radiusM * rr(1.0, 3.2);
+        const s = Math.max(0.12, radiusM * rr(0.035, 0.07));
+        this.addDebris(x, gy, z, 0, 0.2, 0, Math.cos(a) * hs, rr(3, 7) * Math.sqrt(radiusM / 3 + 0.3), Math.sin(a) * hs, s * rr(0.8, 1.5), s * rr(0.6, 1), s * rr(0.8, 1.5), rr(40, 90), 0, road ? 0x3a3a3a : [0x2a2218, 0x1c1814, 0x3a2c1e][i % 3]);
+      }
+    }
+  }
+
+  private craterRecently(x: number, z: number): boolean {
+    for (let i = 0; i < 8; i++) {
+      if (this.clock - this.recentT[i] < 0.4) {
+        const dx = this.recentX[i] - x, dz = this.recentZ[i] - z;
+        if (dx * dx + dz * dz < 1e-4) return true;
+      }
+    }
+    return false;
+  }
+
   // ---- combat:impact
   private onImpact(weapon: WeaponKind, x: number, y: number, z: number, surface: ImpactSurface, radiusKm: number): void {
+    // Krater sind persistent: auch außerhalb des Bildes anlegen (nicht bei Luftdetonation / Kleinwaffen)
+    const cm = CRATER_M[weapon];
+    if (surface === 'ground' && cm && y - this.ground(x, z) < 0.02) {
+      const R = cm * rr(0.85, 1.15);
+      this.makeCrater(x, z, R, R >= 8 ? 1 : R >= 4 ? 0.5 : 0);
+      if (radiusKm <= 0.025 && weapon !== 'bomb' && this.camDist < FAR_SKIP * 0.6 && this.inView(x, y, z, 0.05)) {
+        // kein Explosionsereignis folgt: Druckwelle + dünner Rauchfaden selbst erzeugen
+        const gy = this.ground(x, z);
+        this.rings.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), Math.max(4, R * 3), 2, 1, this.clock, 0.5);
+        if (R >= 1.4) this.addEmitter(2, x, gy, z, rr(12, 22), 2, R * 0.3, R * 0.35);
+      }
+    }
     if (this.camDist > FAR_SKIP * 0.6) return;
     if (!this.inView(x, y, z, 0.05)) return;
     const rm = clamp(radiusKm * 1000, 1.2, 40);
@@ -1346,8 +1421,12 @@ export class Effects {
     // Bodenspuren
     if (!airburst && !water) {
       if (sz >= 1) {
-        this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), X_CRATER[sz], 0, 1, this.clock, 1e9);
-        this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), X_CRATER[sz] * 2.3, 1, 1, this.clock, 1e9);
+        if (sz >= 2 && !this.craterRecently(x, z)) {
+          const R = X_CRATER_R[sz] * (sz >= 4 ? 1 : 0.7) * rr(0.9, 1.1);
+          this.makeCrater(x, z, R, sz >= 3 ? 1 : 0.5);
+        }
+        // Brand-/Auswurfstern flach unter der Schale
+        this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), X_CRATER[sz] * 2.2, sz >= 2 ? 5 : 1, 0.55, this.clock, 1e9);
       } else {
         this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), X_CRATER[sz] * 1.6, 1, 0.9, this.clock, 1e9);
       }
@@ -1509,7 +1588,7 @@ export class Effects {
     const gy = this.ground(x, z);
     this.shake.add(x, z, 0.3);
     this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), 13, 4, 1, this.clock, 1e9);
-    this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), 22, 1, 0.5, this.clock, 1e9);
+    this.craters.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), 22, 5, 0.6, this.clock, 1e9);
     this.rings.add(x, gy, z, this.slopeX(x, z), this.slopeZ(x, z), 26, 2, 1, this.clock, 1.4);
     this.addCloud(x, z, 0.02, 0.55, 40);
     this.addEmitter(3, x, gy, z, 25, 10, 6, 7);
@@ -1640,6 +1719,10 @@ export class Effects {
     this.decalUniforms.uVis.value = this.visScale;
     this.decalUniforms.uTime.value = this.clock;
     this.decalUniforms.uLift.value = this.lift;
+    this.bowlLift.value = this.lift * 1.7;
+    this.bowlsOn = dist < BOWL_MAX_DIST;
+    this.decalUniforms.uBowl.value = this.bowlsOn ? 1 : 0;
+    this.bowls.update(this.bowlsOn);
     const rm = this.ribbons.material.uniforms.uRes.value as THREE.Vector2;
     rm.set(typeof window !== 'undefined' ? window.innerWidth / 2 : 960, screenH);
 

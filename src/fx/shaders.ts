@@ -138,6 +138,7 @@ varying float vSeed;
 varying float vAlpha;
 varying float vAge;
 varying float vT;
+uniform float uBowl;
 float h21(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
@@ -153,8 +154,18 @@ void main() {
   float n = h21(cell + vSeed);
   vec3 col = vec3(0.0);
   float a = 0.0;
-  if (vType < 0.5) {
-    // Krater: dunkle Mulde mit hellerem Auswurfrand
+  if (vType > 4.5) {
+    // Brand-/Auswurfstern: Rußfleck mit radialen Strahlen
+    float an = atan(vUv.y, vUv.x);
+    float rn = h21(vec2(floor(an * 2.865 + 20.0), vSeed));
+    float len = 0.35 + 0.65 * rn * rn;
+    float e = d / len + (h21(cell + vSeed) - 0.5) * 0.25;
+    if (e > 1.0) discard;
+    col = vec3(0.03, 0.027, 0.025) * (0.7 + 0.6 * rn);
+    a = 0.62 * (1.0 - smoothstep(0.35, 1.0, e));
+  } else if (vType < 0.5) {
+    // Krater (Fern-LOD, bei sichtbaren Schalen unterdrückt): dunkle Mulde mit hellerem Auswurfrand
+    if (uBowl > 0.5) discard;
     float e = dq + (n - 0.5) * 0.35;
     if (e > 1.0) discard;
     col = e < 0.55 ? vec3(0.035, 0.03, 0.028) : mix(vec3(0.12, 0.09, 0.065), vec3(0.2, 0.15, 0.1), n);
