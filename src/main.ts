@@ -242,6 +242,8 @@ async function boot() {
     state.update(dt);
     units.update(state.lastHours);
     const gameSec = state.lastHours * 3600;
+    // Der Kampf rechnet je Frame höchstens 3 Spielsekunden: genau diese Rate muss die Effekt-Darstellung kennen
+    effects.timeScale = dt > 0 ? Math.max(1, Math.min(gameSec, 3) / dt) : 1;
     tactics.update(gameSec, dt);
     combat.update(gameSec);
     structures.update(state.lastHours, dt);

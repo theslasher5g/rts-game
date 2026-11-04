@@ -1168,7 +1168,9 @@ export class Effects {
     const det = this.detail();
     const dx = e.tx - e.fx, dy = e.ty - e.fy, dz = e.tz - e.fz;
     const dist = Math.hypot(dx, dy, dz);
-    const flight = e.flightSec;
+    // Flugzeiten kommen in Spielsekunden; die Darstellung läuft in Echtzeit → durch den aktuellen Zeitraffer teilen,
+    // damit Rakete/Spur und Einschlag gleichzeitig ankommen (sonst explodiert es beim Zeitraffer vor der Rakete).
+    const flight = e.flightSec / Math.max(1, this.timeScale);
     const show = this.camDist < FAR_SKIP;
 
     // Mündungsfeuer + Rauch (nur im Bild)
@@ -1691,6 +1693,9 @@ export class Effects {
   }
 
   // ------------------------------------------------------------ Update
+  /** Spielsekunden pro Echtzeitsekunde, mit der der Kampf gerade läuft (main.ts setzt es je Frame) */
+  timeScale = 1;
+
   update(dtRealSec: number, camera: THREE.PerspectiveCamera, timeSec: number, units?: ReadonlyArray<Unit>): void {
     void timeSec;
     const dt = clamp(dtRealSec, 0, 0.1);
