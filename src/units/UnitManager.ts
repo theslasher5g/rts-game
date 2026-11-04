@@ -843,18 +843,19 @@ export class UnitManager {
       for (let i = 0; i < count; i++) list.push(id);
     };
     // Theater-Szenario: alle Nationen stellen eine vollwertige, nach Profil skalierte Streitmacht (gleiche Augenhöhe)
-    const tanks = theatre ? n(st.tanks, 6, 2, 12) : P ? n(st.tanks, 100, 2, 10) : n(st.tanks, 300, 1, 4);
-    const ifvs = theatre ? n(st.ifv, 9, 2, 10) : P ? n(st.ifv, 200, 2, 10) : n(st.ifv, 600, 1, 4);
+    // Einzelfahrzeuge: Zahlen sind FAHRZEUGE (früher Züge à 4). Theater: VAL ≈ 15 KPz / 20 SPz / 8 Rohre, KRN 22 / 22 / 12, MAR 6 / 9 / 4
+    const tanks = theatre ? n(st.tanks, 2.4, 4, 22) : P ? n(st.tanks, 50, 3, 14) : n(st.tanks, 150, 2, 6);
+    const ifvs = theatre ? n(st.ifv, 2.7, 4, 22) : P ? n(st.ifv, 100, 3, 14) : n(st.ifv, 300, 2, 6);
     const inf = theatre ? n(st.manpower, 2, 4, 14) : P ? n(st.manpower, 12, 4, 16) : n(st.manpower, 40, 2, 6);
-    const art = theatre ? n(st.artillery, 5, 2, 6) : P ? n(st.artillery, 80, 1, 6) : n(st.artillery, 300, 1, 2);
+    const art = theatre ? n(st.artillery, 3, 3, 12) : P ? n(st.artillery, 60, 2, 10) : n(st.artillery, 200, 1, 3);
     const heavy = Math.ceil(tanks * 0.5);
     add('mbt_heavy', heavy);
     add('mbt_medium', tanks - heavy);
-    if (P && st.tanks >= 800) add('light_tank', 2);
+    if (P && st.tanks >= 800) add('light_tank', 3);
     const tracked = Math.ceil(ifvs * 0.7);
     add('ifv', tracked);
     add('apc_wheeled', ifvs - tracked);
-    add('recon_wheeled', P ? n(st.tanks + st.ifv, 600, 1, 3) : 1);
+    add('recon_wheeled', P ? n(st.tanks + st.ifv, 300, 2, 5) : 1);
     add('inf_squad', inf);
     add('mg_team', P ? Math.max(1, Math.round(inf / 4)) : inf >= 4 ? 1 : 0);
     add('at_team', P ? Math.max(1, Math.round(inf / 3)) : 1);
@@ -867,16 +868,16 @@ export class UnitManager {
     add('sp_artillery', sp);
     add('mlrs', ml);
     add('mortar_team', art - sp - ml + (P ? 1 : 0));
-    add('spaa', P ? 2 : 1);
-    add('sam', P ? (st.aircraft >= 150 ? 2 : 1) : st.aircraft >= 200 ? 1 : 0);
+    add('spaa', P ? 3 : 1);
+    add('sam', P ? (st.aircraft >= 150 ? 3 : 2) : st.aircraft >= 200 ? 1 : 0);
     add('supply_truck', P ? 3 : 1);
-    const helis = P ? n(st.helicopters, 100, 1, 3) : st.helicopters >= 150 ? 1 : 0;
+    const helis = P ? n(st.helicopters, 50, 2, 6) : st.helicopters >= 150 ? 1 : 0;
     const atk = Math.ceil(helis * 0.67);
     add('attack_heli', atk);
     add('transport_heli', helis - atk);
-    const jets = P ? n(st.aircraft, 80, 1, 4) : st.aircraft >= 100 ? 1 : 0;
+    const jets = P ? n(st.aircraft, 40, 2, 8) : st.aircraft >= 100 ? 1 : 0;
     add('fighter', jets);
-    if (P && st.aircraft >= 200) add('bomber', 1);
+    if (P && st.aircraft >= 200) add('bomber', 2);
     add('recon_drone', P ? n(st.drones, 1000, 1, 2) : st.drones >= 500 ? 1 : 0);
     add('fpv_swarm', P ? n(st.drones, 2000, 0, 3) : st.drones >= 3000 ? 1 : 0);
     const ships = st.ships > 0 ? (P ? n(st.ships, 40, 1, 4) : n(st.ships, 100, 0, 2)) : 0;
@@ -894,7 +895,7 @@ export class UnitManager {
       for (let i = 0; i < left; i++) shipList.push('frigate');
     }
     // Obergrenze: zuerst Infanterie kürzen
-    const cap = (P ? 80 : 25) - shipList.length;
+    const cap = (P ? 92 : 30) - shipList.length;
     while (list.length > cap) {
       const k = list.lastIndexOf('inf_squad');
       list.splice(k >= 0 ? k : list.length - 1, 1);
@@ -905,19 +906,21 @@ export class UnitManager {
     const bn = 100 + (h % 280);
     const counters = new Map<string, number>();
     const nameOf = (typeId: string, baseIdx: number): string => {
-      const k = (counters.get(typeId) ?? 0) + 1;
-      counters.set(typeId, k);
+      // Fahrzeuge einer Familie zählen gemeinsam durch ('Panzer 12', 'SPz 7' ...)
+      const fam = typeId === 'mbt_heavy' || typeId === 'mbt_medium' || typeId === 'light_tank' ? 'tank' : typeId === 'ifv' || typeId === 'apc_wheeled' ? 'ifv' : typeId === 'attack_heli' || typeId === 'transport_heli' ? 'heli' : typeId;
+      const k = (counters.get(fam) ?? 0) + 1;
+      counters.set(fam, k);
       const b = bn + baseIdx * 10;
       switch (typeId) {
         case 'mbt_heavy':
         case 'mbt_medium':
         case 'light_tank':
-          return `${k}. Kp / PzBtl ${b}`;
+          return `${typeId === 'light_tank' ? 'lPz' : 'Panzer'} ${k} / PzBtl ${b}`;
         case 'ifv':
         case 'apc_wheeled':
-          return `${k}. Kp / PzGrenBtl ${b + 2}`;
+          return `${typeId === 'ifv' ? 'SPz' : 'RadSPz'} ${k} / PzGrenBtl ${b + 2}`;
         case 'recon_wheeled':
-          return `${k}. Kp / AufklBtl ${b + 4}`;
+          return `Spähwagen ${k} / AufklBtl ${b + 4}`;
         case 'inf_squad':
           return `${Math.floor((k - 1) / 3) + 1}. Zug / ${((k - 1) % 3) + 1}. Grp / JgBtl ${b + 1}`;
         case 'mg_team':
@@ -933,23 +936,23 @@ export class UnitManager {
         case 'mortar_team':
           return `MrsZug ${k} / JgBtl ${b + 1}`;
         case 'sp_artillery':
-          return `${k}. Bttr / ArtBtl ${b + 5}`;
+          return `PzH ${k} / ArtBtl ${b + 5}`;
         case 'mlrs':
-          return `${k}. Bttr / RakArtBtl ${b + 7}`;
+          return `RakW ${k} / RakArtBtl ${b + 7}`;
         case 'spaa':
-          return `${k}. Bttr / FlaBtl ${b + 8}`;
+          return `Flak ${k} / FlaBtl ${b + 8}`;
         case 'sam':
-          return `${k}. Staffel / FlaRakGrp ${(h % 5) + 1}`;
+          return `FlaRak ${k} / FlaRakGrp ${(h % 5) + 1}`;
         case 'supply_truck':
-          return `${k}. Kp / VersBtl ${b + 6}`;
+          return `Vers-LKW ${k} / VersBtl ${b + 6}`;
         case 'attack_heli':
-          return `${k}. Staffel / KpfHubschrRgt ${(h % 4) + 26}`;
+          return `KpfHS ${k} / KpfHubschrRgt ${(h % 4) + 26}`;
         case 'transport_heli':
-          return `${k}. Staffel / TrspHubschrRgt ${(h % 4) + 10}`;
+          return `TrspHS ${k} / TrspHubschrRgt ${(h % 4) + 10}`;
         case 'fighter':
-          return `${k}. Staffel / TaktLwG ${(h % 7) + 71}`;
+          return `Jäger ${k} / TaktLwG ${(h % 7) + 71}`;
         case 'bomber':
-          return `${k}. Staffel / JaBoG ${(h % 5) + 31}`;
+          return `JaBo ${k} / JaBoG ${(h % 5) + 31}`;
         case 'recon_drone':
           return `AufklDrohnenStff ${k}`;
         case 'fpv_swarm':

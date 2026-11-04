@@ -5,6 +5,7 @@
  */
 import type { BaseKind } from './types';
 import { SCENARIO_NATIONS } from '../game/scenario';
+import { PER_VEHICLE_SCALE } from '../units/unitTypes';
 
 /** Preis je Einheitentyp in Fässern */
 export const PRICE: Record<string, number> = {
@@ -18,6 +19,13 @@ export const PRICE: Record<string, number> = {
   recon_drone: 15, fpv_swarm: 12,
   destroyer: 400, frigate: 260, submarine: 220,
 };
+
+/**
+ * Einzelfahrzeuge: Die Preise oben galten für einen ganzen Zug (n Fahrzeuge); je Fahrzeug = Preis / n (min. 2 Fässer).
+ * Ausnahme Tankwagen: Ladung 120 Fässer gilt jetzt je Wagen, daher nicht auf 1/3 gesenkt (12 statt 25).
+ */
+for (const [id, n] of Object.entries(PER_VEHICLE_SCALE)) if (PRICE[id] !== undefined) PRICE[id] = Math.max(2, Math.round(PRICE[id] / n));
+PRICE.tanker_truck = 12;
 
 export function priceOf(typeId: string): number {
   return PRICE[typeId] ?? 20;

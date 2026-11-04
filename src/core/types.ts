@@ -104,6 +104,8 @@ export interface Settings {
   showCities: boolean;
   /** Phase 2: Straßen-/Schienennetz anzeigen */
   showRoads: boolean;
+  /** Phase 6: Nebel des Krieges (optional, Standard an) */
+  fogOfWar?: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -117,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showLabels: true,
   showCities: true,
   showRoads: true,
+  fogOfWar: true,
 };
 
 /** Ergebnis eines Kartenpicks (Maus -> Welt) */
@@ -135,7 +138,7 @@ export interface GameEvents {
   'country:select': { id: number };
   'settings:changed': { settings: Settings };
   'camera:focus': { x: number; z: number; distance?: number };
-  'game:start': { countryA3: string };
+  'game:start': { countryA3: string; /** Phase 6: Kampagnenmission (id aus game/missions/campaign.ts); fehlt = freies Spiel */ missionId?: string };
   // Phase 2
   /** Auswahl hat sich geändert (Unit-IDs) */
   'units:selection': { ids: number[] };

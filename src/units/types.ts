@@ -1,6 +1,6 @@
 /**
  * Phase 2 – Einheiten-Verträge.
- * Eine Unit = ein Verband auf der Karte (Infanterie-Trupp, Panzerzug, Batterie, Staffel, Schiff),
+ * Eine Unit = ein Infanterie-Trupp, ein FPV-Schwarm oder genau EIN Fahrzeug/Flugzeug/Schiff (memberCount 1),
  * dargestellt als Gruppe mehrerer Modelle (memberCount).
  */
 import type { MobilityProfile, Route } from '../nav/types';

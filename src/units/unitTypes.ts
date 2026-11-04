@@ -151,6 +151,25 @@ const DEFS: Record<string, Def> = {
     { armor: 30, hp: 700, damage: 250, rangeKm: 20, sightKm: 15, ammo: 12, fuelKm: 9000, cost: 600 }),
 };
 
+/**
+ * Einzelfahrzeuge: Jedes Fahrzeug (alles außer Infanterie-Trupps und FPV-Schwarm) ist EINE Unit (memberCount 1).
+ * Die Tabellenwerte oben beschreiben weiterhin den früheren ZUG (n Fahrzeuge); hier werden sie auf ein Fahrzeug
+ * heruntergerechnet, sodass n Einzelfahrzeuge in Summe genau einem alten Zug entsprechen:
+ *   hp/n, Schaden je Schuss/n (siehe weapons.ts), Feuerrate und Munition je Fahrzeug unverändert
+ *   (n Fahrzeuge × Schuss/n = alter Zug), Kosten/n, Tank unverändert.
+ * PER_VEHICLE_SCALE: Typ-ID → alte Zuggröße n (nur umgestellte Typen).
+ */
+export const PER_VEHICLE_SCALE: Record<string, number> = {};
+for (const [id, d] of Object.entries(DEFS)) {
+  const n = d.memberCount;
+  if (n <= 1 || d.model === 'soldier' || id === 'fpv_swarm') continue;
+  PER_VEHICLE_SCALE[id] = n;
+  d.memberCount = 1;
+  d.hp = Math.max(5, Math.round(d.hp / n));
+  d.damage = Math.round((d.damage / n) * 10) / 10;
+  d.cost = d.cost >= 10 ? Math.round(d.cost / n) : Math.round((d.cost / n) * 100) / 100;
+}
+
 export const UNIT_TYPES: Record<string, UnitTypeDef> = Object.fromEntries(
   Object.entries(DEFS).map(([id, d]) => [id, { id, ...d } as UnitTypeDef]),
 );

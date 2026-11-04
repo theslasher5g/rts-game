@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { GeoData } from './GeoData';
 import type { Settings } from '../core/types';
+import { FOG_GLSL, createFogUniforms, setFogUniforms, type FogUniforms } from '../fog/fogShader';
 
 /**
  * GPU-verschobenes, gechunktes LOD-Gelände (Defilade/PS2-Look).
@@ -291,7 +292,7 @@ const FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
 #include <fog_pars_fragment>
-
+${FOG_GLSL}
 uniform sampler2D uIds;
 uniform sampler2D uPalette;
 uniform sampler2D uNoiseN;
@@ -499,7 +500,7 @@ void main() {
   float pulse = 0.5 + 0.5 * sin(uTime * 4.0);
   col = mix(col, srgb(vec3(1.0, 0.86, 0.42)) * (0.8 + 0.6 * pulse), selE);
 
-  gl_FragColor = vec4(col * vLight, 1.0);
+  gl_FragColor = vec4(fogOfWar(col * vLight, vWorld.xz), 1.0);
   #include <fog_fragment>
 }
 `;
@@ -524,6 +525,8 @@ export class Terrain {
 
   private readonly geo: GeoData;
   private readonly uniforms: Record<string, THREE.IUniform>;
+  /** Phase 6: Nebel des Krieges (Textur wird von FogOfWar geliefert) */
+  private readonly fogUniforms: FogUniforms = createFogUniforms();
   private readonly lods: LodLevel[] = [];
   private readonly chunksX: number;
   private readonly chunksZ: number;
@@ -591,6 +594,7 @@ export class Terrain {
       uPlayer: { value: 0 },
       uTime: { value: 0 },
       uBorderPx: { value: 0.85 },
+      ...this.fogUniforms,
     };
 
     const group = new THREE.Group();
@@ -690,6 +694,19 @@ export class Terrain {
         lod.attr.needsUpdate = true;
       }
     }
+  }
+
+  /** Nebel des Krieges: Textur (R = sichtbar, G = erkundet) über die ganze Karte; null = aus */
+  setFogTexture(tex: THREE.Texture | null, widthKm: number, heightKm: number): void {
+    setFogUniforms(this.fogUniforms, tex, widthKm, heightKm);
+  }
+
+  setFogEnabled(on: boolean): void {
+    this.fogUniforms.uFogOn.value = on && this.fogUniforms.uFog.value.image && (this.fogUniforms.uFog.value.image as { width: number }).width > 1 ? 1 : 0;
+  }
+
+  get fogUniformSet(): FogUniforms {
+    return this.fogUniforms;
   }
 
   setHover(countryId: number): void {

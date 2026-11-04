@@ -143,6 +143,8 @@ export class CombatSystem {
   private readonly war: WarQuery;
   private exag: number;
   private smoke?: SmokeQuery;
+  /** Phase 6: Nebel des Krieges (nur für die Seite des Spielers; KI-Nationen unberührt) */
+  private fog: { isUnitVisible(u: Unit): boolean; isFriendly(a3: string): boolean } | null = null;
   private cover?: CoverQuery;
   private protection?: TargetProtection;
   private buildings?: BuildingProvider;
@@ -262,10 +264,19 @@ export class CombatSystem {
     return r || 'Ziel liegt in einem geschützten Gebiet.';
   }
 
+  /** Nebel des Krieges: Angriffsbefehle der Spieler-Seite auf nicht aufgeklärte Gegner werden abgelehnt (null = aus) */
+  setFog(f: { isUnitVisible(u: Unit): boolean; isFriendly(a3: string): boolean } | null): void {
+    this.fog = f;
+  }
+
   orderAttack(unitIds: number[], targetId: number): void {
     const t = this.units.get(targetId);
     if (!t || t.hp <= 0) return;
     let warned = false;
+    if (this.fog && !this.fog.isUnitVisible(t) && unitIds.some((id) => { const a = this.units.get(id); return !!a && this.fog!.isFriendly(a.owner); })) {
+      bus.emit('toast', { msg: 'Ziel nicht aufgeklärt', kind: 'warn' });
+      unitIds = unitIds.filter((id) => { const a = this.units.get(id); return !a || !this.fog!.isFriendly(a.owner); });
+    }
     for (const id of unitIds) {
       const u = this.units.get(id);
       if (!u || u.hp <= 0 || u === t) continue;

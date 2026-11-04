@@ -4,6 +4,7 @@
  * Reichweiten km, Geschwindigkeit km/h, rofPerMin = Schuss/Salven je Minute bei voller Stärke.
  */
 import type { WeaponKind } from './types';
+import { PER_VEHICLE_SCALE } from '../units/unitTypes';
 
 export type TargetClass = 'ground' | 'air' | 'naval' | 'building' | 'structure';
 
@@ -117,7 +118,7 @@ const NAVAL_GUN_76 = w({ id: 'naval_76', name: 'Schiffsgeschütz 76 mm', kind: '
 const ASM = (range: number, dmg: number) => w({ id: 'asm', name: 'Seezielflugkörper', kind: 'antiship_missile', damage: dmg, armorPen: 95, rangeKm: range, minRangeKm: 2, rofPerMin: 4, accuracy: 0.8, splashKm: 0.04, suppression: 0.4, projectileSpeedKmh: 1100, ammoPerShot: 4, moveFire: 1, guided: true, needsLOS: false, buildingMul: 2, targets: ['naval', 'ground', 'building'] });
 const TORPEDO = w({ id: 'torpedo', name: 'Torpedo', kind: 'torpedo', damage: 350, armorPen: 100, rangeKm: 14, minRangeKm: 0.8, rofPerMin: 3, accuracy: 0.72, splashKm: 0.05, suppression: 0.5, projectileSpeedKmh: 180, ammoPerShot: 1, moveFire: 1, guided: true, needsLOS: false, targets: ['naval'] });
 
-export const WEAPONS_BY_UNIT: Record<string, WeaponDef[]> = {
+const WEAPONS_PLATOON: Record<string, WeaponDef[]> = {
   inf_squad: [RIFLE, GRENADE],
   mg_team: [MG],
   at_team: [ATGM_INF, RPG, { ...RIFLE, id: 'rifle_light', damage: 1.5, rofPerMin: 40 }],
@@ -147,6 +148,28 @@ export const WEAPONS_BY_UNIT: Record<string, WeaponDef[]> = {
   frigate: [NAVAL_GUN_76, ASM(25, 260), SAM_SHIP],
   submarine: [TORPEDO],
 };
+
+/**
+ * Einzelfahrzeuge: Die Tabelle oben ist für den früheren Zug von n Fahrzeugen geschrieben. Je Fahrzeug wird der
+ * Schaden je Schuss durch n geteilt (Feuerrate, Reichweite, Genauigkeit, Munitionsverbrauch bleiben); n Fahrzeuge
+ * ergeben so wieder genau die alte Zug-Feuerkraft, und Schaden/HP je Schuss bleiben im selben Verhältnis (hp ist ebenfalls /n).
+ */
+export const WEAPONS_BY_UNIT: Record<string, WeaponDef[]> = Object.fromEntries(
+  Object.entries(WEAPONS_PLATOON).map(([id, ws]) => {
+    const n = PER_VEHICLE_SCALE[id] ?? 1;
+    return [id, n === 1 ? ws : ws.map((wd) => ({ ...wd, damage: Math.round((wd.damage / n) * 100) / 100 }))];
+  }),
+);
+
+/** Flächen-/Indirektfeuer (Feuerbefehl 'Feuer'): Artillerie, Raketenwerfer, Mörser, Schiffsgeschütze, Panzerkanonen */
+export function canAreaFire(typeId: string): boolean {
+  return (WEAPONS_BY_UNIT[typeId] ?? []).some((wd) => (wd.indirect && wd.kind !== 'bomb') || wd.kind === 'tank_gun' || wd.kind === 'naval_gun' || (wd.kind === 'autocannon' && wd.splashKm > 0 && wd.rangeKm >= 2));
+}
+
+/** Hat der Typ irgendeine Waffe */
+export function isArmedType(typeId: string): boolean {
+  return (WEAPONS_BY_UNIT[typeId] ?? []).length > 0;
+}
 
 /** Größte Reichweite aller Waffen eines Typs (km) */
 export function maxRangeOf(typeId: string): number {

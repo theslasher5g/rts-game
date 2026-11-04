@@ -216,3 +216,27 @@
 .up-build .up-spawn-list { padding: 6px 8px 8px; }
 .up-testtools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0 4px; }
 .up-testtools select { max-width: 140px; }
+
+/* Hover: Ring + Etikett an der Einheit unter dem Mauszeiger */
+#ui > .ctl-hover {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid rgba(255, 236, 160, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 8px rgba(255, 220, 120, 0.45);
+  z-index: 5;
+}
+#ui > .ctl-hover.enemy { border-color: rgba(255, 96, 80, 0.95); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 8px rgba(255, 80, 60, 0.45); }
+#ui > .ctl-tip {
+  position: absolute;
+  pointer-events: none;
+  padding: 2px 7px;
+  font: 12px/1.4 'Share Tech Mono', monospace;
+  white-space: nowrap;
+  color: var(--amber-hi);
+  background: rgba(14, 16, 10, 0.88);
+  border: 1px solid var(--amber);
+  z-index: 6;
+}
+#ui > .ctl-tip.enemy { color: var(--bad); border-color: var(--bad); }
+#ui > .ctl-hover.hidden, #ui > .ctl-tip.hidden { display: none; }

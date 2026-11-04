@@ -2,6 +2,7 @@ import { bus } from '../core/EventBus';
 import { WATER_LAKE, WATER_RIVER } from '../core/types';
 import { getProfile } from '../game/countryData';
 import type { GeoData } from '../world/GeoData';
+import type { FogOfWar } from '../fog/FogOfWar';
 
 const MM_WIDTH = 300;
 
@@ -41,6 +42,12 @@ export class Minimap {
   private markersDirty = true;
   private playerA3 = '';
   private dragging = false;
+  // Nebel des Krieges
+  private fog: FogOfWar | null = null;
+  private fogEpoch = -1;
+  private readonly fogCanvas: HTMLCanvasElement;
+  private readonly fogCtx: CanvasRenderingContext2D;
+  private fogImg: ImageData | null = null;
 
   constructor(root: HTMLElement, geo: GeoData) {
     this.geo = geo;
@@ -67,7 +74,12 @@ export class Minimap {
       c.style.width = `${this.w}px`;
       c.style.height = `${this.h}px`;
     }
-    cw.append(this.base, this.overlay);
+    this.fogCanvas = document.createElement('canvas');
+    this.fogCanvas.width = this.w;
+    this.fogCanvas.height = this.h;
+    this.fogCanvas.style.cssText = `position:absolute;left:0;top:0;width:${this.w}px;height:${this.h}px;pointer-events:none;display:none`;
+    this.fogCtx = this.fogCanvas.getContext('2d')!;
+    cw.append(this.base, this.fogCanvas, this.overlay);
     this.wrap.append(head, cw);
     layer.appendChild(this.wrap);
     root.appendChild(layer);
@@ -191,7 +203,40 @@ export class Minimap {
     this.wrap.classList.add('hidden');
   }
 
+  /** Nebel des Krieges: dunkle Ebene für unerkundetes Gebiet, gedämpft für erkundetes, Marker nur für erkundete Orte */
+  setFog(fog: FogOfWar | null): void {
+    this.fog = fog;
+    this.fogEpoch = -1;
+    this.markersDirty = true;
+    if (!fog) this.fogCanvas.style.display = 'none';
+  }
+
+  private renderFog(fog: FogOfWar): void {
+    this.fogEpoch = fog.epoch;
+    if (!fog.active) {
+      this.fogCanvas.style.display = 'none';
+      return;
+    }
+    this.fogCanvas.style.display = '';
+    if (!this.fogImg) this.fogImg = this.fogCtx.createImageData(this.w, this.h);
+    const d = this.fogImg.data;
+    const kx = (fog.widthKm / this.w) / fog.cellKm, kz = (fog.heightKm / this.h) / fog.cellKm;
+    for (let j = 0; j < this.h; j++) {
+      const fj = Math.min(fog.rows - 1, Math.floor((j + 0.5) * kz));
+      for (let i = 0; i < this.w; i++) {
+        const fi = Math.min(fog.cols - 1, Math.floor((i + 0.5) * kx));
+        const k = fj * fog.cols + fi;
+        const p = (j * this.w + i) * 4;
+        d[p] = 4; d[p + 1] = 6; d[p + 2] = 12;
+        d[p + 3] = fog.vis[k] ? 0 : fog.explored[k] ? 105 : 225;
+      }
+    }
+    this.fogCtx.putImageData(this.fogImg, 0, 0);
+    this.markersDirty = true;
+  }
+
   update(footprint: Array<[number, number]>, selectedId: number, playerId: number): void {
+    if (this.fog && this.fog.epoch !== this.fogEpoch) this.renderFog(this.fog);
     if (selectedId !== this.selectedId || playerId !== this.playerId) {
       this.renderBase(selectedId, playerId);
       this.playerA3 = this.geo.countriesById.get(playerId)?.a3 ?? '';
@@ -239,6 +284,7 @@ export class Minimap {
     if (!sc) return;
     const kx = this.w / this.geo.widthKm, kz = this.h / this.geo.heightKm;
     for (const f of sc.oilFields) {
+      if (this.fog && !this.fog.isExplored(f.pos[0], f.pos[1])) continue;
       const x = Math.round(f.pos[0] * kx), y = Math.round(f.pos[1] * kz);
       const owner = this.oilOwner.get(f.id) ?? '';
       ctx.fillStyle = ownerColor(owner, '#8b876f');

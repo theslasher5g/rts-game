@@ -1,6 +1,82 @@
 import type { BuildingInfo, StructureKind } from '../combat/types';
 import type { Unit } from '../units/types';
 import type { ProtectionQuery } from '../civil/types';
+import { canAreaFire, isArmedType } from '../combat/weapons';
+
+/** Was ein Einheitentyp / eine Auswahl befehligen kann (Befehlspanel + Hotkeys) */
+export interface Capabilities {
+  move: boolean;
+  attackMove: boolean;
+  reverse: boolean;
+  patrol: boolean;
+  hold: boolean;
+  stop: boolean;
+  fireAt: boolean;
+  garrison: boolean;
+  ungarrison: boolean;
+  build: boolean;
+  demolish: boolean;
+  repair: boolean;
+}
+
+export type CapKey = keyof Capabilities;
+
+export function isInfantryUnit(u: Unit): boolean {
+  return u.type.category === 'infantry';
+}
+
+/** Fähigkeiten eines einzelnen Einheitentyps */
+export function capabilitiesOfType(t: Unit['type']): Capabilities {
+  const armed = isArmedType(t.id);
+  const air = t.mobility.domain === 'air';
+  const support = t.category === 'support';
+  const inf = t.category === 'infantry';
+  const eng = t.id === 'engineer_squad';
+  return {
+    move: true,
+    hold: true,
+    stop: true,
+    attackMove: armed,
+    patrol: armed,
+    // Rückwärts: Bodenfahrzeuge und Schiffe mit Bewaffnung (nicht Luft, nicht Infanterie, nicht Versorger)
+    reverse: !air && !inf && !support && armed,
+    fireAt: canAreaFire(t.id),
+    garrison: inf,
+    ungarrison: inf,
+    build: eng,
+    demolish: eng,
+    repair: eng,
+  };
+}
+
+/** Vereinigung der Fähigkeiten einer Auswahl (Button sichtbar, wenn mindestens eine Einheit den Befehl nutzen kann) */
+export function capabilitiesOf(units: readonly Unit[]): Capabilities {
+  const out: Capabilities = {
+    move: false, attackMove: false, reverse: false, patrol: false, hold: false, stop: false,
+    fireAt: false, garrison: false, ungarrison: false, build: false, demolish: false, repair: false,
+  };
+  for (const u of units) {
+    const c = capabilitiesOfType(u.type);
+    for (const k of Object.keys(out) as CapKey[]) if (c[k]) out[k] = true;
+  }
+  return out;
+}
+
+/** Kurzer Hinweis, wer den Befehl ausführen kann (Toast bei unpassender Taste) */
+export const CAP_REFUSAL: Record<CapKey, string> = {
+  move: 'Keine bewegliche Einheit ausgewählt',
+  hold: 'Keine Einheit ausgewählt',
+  stop: 'Keine Einheit ausgewählt',
+  attackMove: 'Nur bewaffnete Einheiten können Angriffsbewegung ausführen',
+  patrol: 'Nur bewaffnete Einheiten können patrouillieren',
+  reverse: 'Rückwärtsfahren nur für bewaffnete Bodenfahrzeuge und Schiffe',
+  fireAt: 'Feuerbefehl nur für Artillerie, Raketenwerfer, Mörser, Schiffe und Panzer',
+  garrison: 'Nur Infanterie kann Gebäude besetzen',
+  ungarrison: 'Nur Infanterie kann Gebäude räumen',
+  build: 'Nur Pioniere können bauen',
+  demolish: 'Nur Pioniere können sprengen',
+  repair: 'Nur Pioniere können reparieren',
+};
 
 /**
  * Phase 3 – Befehle rund um Kampf, Bauen, Gebäude und Brücken.
@@ -182,7 +258,7 @@ export class CombatControls {
         this.c.toast('Kampfsystem nicht verfügbar', 'warn');
         return true;
       }
-      const shooters = this.filterIds(ids, (u) => u.type.category === 'artillery' || u.type.category === 'naval' || u.type.category === 'aa' || u.type.category === 'tank' || u.type.category === 'ifv');
+      const shooters = this.filterIds(ids, (u) => canAreaFire(u.type.id));
       if (!shooters.length) {
         this.c.toast('Keine feuerfähigen Einheiten ausgewählt', 'warn');
         return true;
@@ -210,7 +286,7 @@ export class CombatControls {
     if (mode === 'demolish' || mode === 'repair') {
       const eng = this.engineers();
       if (!eng.length) {
-        this.c.toast('Pioniere auswählen (Pionier-Trupp)', 'warn');
+        this.c.toast('Nur Pioniere können sprengen/reparieren – Pionier-Trupp auswählen', 'warn');
         return true;
       }
       const edge = s.structures?.bridgeEdgeNear(x, z, this.c.pickRadiusKm()) ?? -1;
@@ -226,7 +302,7 @@ export class CombatControls {
     // build
     const eng = this.engineers();
     if (!eng.length) {
-      this.c.toast('Pioniere auswählen (Pionier-Trupp)', 'warn');
+      this.c.toast('Nur Pioniere können bauen – Pionier-Trupp auswählen', 'warn');
       return true;
     }
     if (!s.structures) return true;
@@ -250,7 +326,7 @@ export class CombatControls {
   }
 
   ungarrison(): void {
-    const inf = this.filterIds(this.c.commandIds(), () => true);
+    const inf = this.filterIds(this.c.commandIds(), (u) => u.type.category === 'infantry');
     this.services.structures?.ungarrison(inf);
   }
 }

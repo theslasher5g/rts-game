@@ -73,16 +73,9 @@ function echelonOf(t: UnitTypeDef): string {
   switch (t.category) {
     case 'infantry':
       return t.memberCount >= 6 ? '•' : 'ø';
-    case 'tank':
-    case 'ifv':
-    case 'recon':
-      return '•••';
     case 'artillery':
     case 'aa':
-      return t.memberCount >= 3 ? 'I' : '•';
-    case 'helicopter':
-    case 'jet':
-      return '••';
+      return t.memberCount >= 3 ? 'I' : '';
     case 'drone':
       return t.memberCount > 1 ? '••' : '';
     default:
@@ -779,6 +772,7 @@ export class UnitRenderer {
   private readonly ownerColors = new Map<string, OwnerColors>();
   private readonly affilCache = new Map<string, number>();
   private affilPlayer: string | null = '\u0000';
+  private fog: { isUnitVisible(u: Unit): boolean } | null = null;
   private readonly typeIndex = new Map<string, number>();
 
   // Zeichen
@@ -933,12 +927,48 @@ export class UnitRenderer {
     this.exag = s.heightExaggeration;
   }
 
+  /** Nebel des Krieges: Gegner, für die isUnitVisible false liefert, werden nicht gezeichnet (null = aus) */
+  setFog(fog: { isUnitVisible(u: Unit): boolean } | null): void {
+    this.fog = fog;
+  }
+
   /** Welt-Radius (km), den eine Einheit beim aktuellen Zoom optisch abdeckt (für Picking) */
   visualRadiusKm(u: Unit): number {
     if (this.counterMode) return (COUNTER_PX * 0.5) * this.pxKm;
     const def = this.models[this.keyOf(u)];
     if (!def) return 0.05 * this.visScale;
     return Math.max(this.unitRadius(def, u.type.memberCount), 10 * this.pxKm);
+  }
+
+  /**
+   * Picking: tatsächlich gezeichnete Position des Einheitenmittelpunkts (Luftfahrzeuge werden in der Nahansicht
+   * in der Höhe gestaucht, siehe update()). out = [x, y, z] in Welt-km.
+   */
+  pickAnchor(u: Unit, out: [number, number, number]): void {
+    out[0] = u.x;
+    out[2] = u.z;
+    if (u.type.mobility.domain === 'air') {
+      const ground = Math.max(0, this.geo.heightAt(u.x, u.z)) * this.exag;
+      const alt = Math.max(0, u.y - ground);
+      out[1] = ground + Math.min(alt, 0.15 * this.camDist + 0.03);
+    } else out[1] = u.type.mobility.domain === 'naval' ? 0 : u.y;
+  }
+
+  /**
+   * Picking: Radius (km) des Kreises, der alle gezeichneten Mitglieder der Einheit umschließt
+   * (aus den aktuellen Darstellungs-Offsets; Fallback: visualRadiusKm).
+   */
+  pickRadiusKm(u: Unit): number {
+    const base = this.visualRadiusKm(u);
+    if (this.counterMode || u.type.memberCount <= 1) return base;
+    const v = this.vis.get(u.id);
+    const def = this.models[this.keyOf(u)];
+    if (!v || !def || !v.init) return base;
+    let m = 0;
+    const n = Math.min(v.off.length >> 1, Math.ceil(u.membersAlive ?? u.type.memberCount));
+    for (let i = 0; i < n; i++) m = Math.max(m, Math.hypot(v.off[i * 2], v.off[i * 2 + 1]));
+    const r = this.visScale * 0.001 * (m + def.size * def.boost * 0.6);
+    return Math.max(base * 0.5, r);
   }
 
   /** zuletzt ermittelter Kameraabstand zum Boden (km) */
@@ -1017,8 +1047,10 @@ export class UnitRenderer {
     const smooth = 1 - Math.exp(-dt * 3);
     const maxDist = dist * 5 + 20;
 
+    const fog = this.fog;
     for (let i = 0; i < n; i++) {
       const u = units[i];
+      if (fog && !fog.isUnitVisible(u)) continue; // Nebel des Krieges: nicht aufgeklärte Gegner nicht zeichnen
       const def = this.models[this.keyOf(u)];
       const domain = u.type.mobility.domain;
       const ground = domain === 'naval' ? 0 : Math.max(0, this.geo.heightAt(u.x, u.z)) * this.exag;
@@ -1190,8 +1222,10 @@ export class UnitRenderer {
         const row = Math.floor(i / cols), col = i % cols;
         const inRow = Math.min(cols, n - row * cols);
         const spread = cat === 'infantry' ? 1.2 : 1.35;
-        ox = (col - (inRow - 1) / 2) * sp * spread + jit(u.id, i, 3) * sp * 0.5;
-        oz = row * sp * 1.1 + jit(u.id, i, 4) * sp * 0.4;
+        // Einzelfahrzeug: exakt auf dem Einheitenmittelpunkt (kein Jitter), damit Klick/Auswahl genau trifft
+        const jm = nAll > 1 ? 1 : 0;
+        ox = (col - (inRow - 1) / 2) * sp * spread + jit(u.id, i, 3) * sp * 0.5 * jm;
+        oz = row * sp * 1.1 + jit(u.id, i, 4) * sp * 0.4 * jm;
       }
       t[i * 2] = ox;
       t[i * 2 + 1] = oz;
@@ -1296,7 +1330,7 @@ export class UnitRenderer {
       const wz = u.z + ox * sh + oz * ch;
       let wy = uy;
       if (isGround) wy = Math.max(0, this.geo.heightAt(wx, wz)) * this.exag;
-      const yawJ = !moving && isGround ? jit(u.id, i, 5) * (cat === 'infantry' ? 1.2 : 0.25) : 0;
+      const yawJ = !moving && isGround && nAll > 1 ? jit(u.id, i, 5) * (cat === 'infantry' ? 1.2 : 0.25) : 0;
       const yawBase = coverYaw === coverYaw ? coverYaw : h;
       _e.set(v.pitch + wobP, -yawBase + yawJ, v.roll + wobR);
       _q.setFromEuler(_e);

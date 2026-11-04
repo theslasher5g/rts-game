@@ -1,0 +1,128 @@
+/* ==========================================================================
+   Phase 6 – Missionen: Zieltracker, Tutorial-Karte, Endbildschirm, Kampagnenmenü
+   ========================================================================== */
+
+/* ---- Zieltracker (links unter der Ölanzeige) ---- */
+.ms-layer { z-index: 5; }
+.ms-panel {
+  position: absolute;
+  top: var(--ms-top, 84px);
+  left: var(--ms-left, 8px);
+  width: 286px;
+  max-width: calc(100vw - 16px);
+  font-size: 12px;
+}
+.ms-panel .panel-head { cursor: pointer; }
+.ms-panel .ms-toggle { color: var(--dim); font-size: 11px; }
+.ms-body { padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 5px; }
+.ms-panel.collapsed .ms-body { display: none; }
+.ms-time { display: flex; justify-content: space-between; color: var(--khaki); font-size: 11px; letter-spacing: 0.05em; }
+.ms-time .warn { color: var(--bad); animation: blink 1s steps(2) infinite; }
+.ms-sect { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-top: 3px; border-top: 1px solid var(--line-dim); padding-top: 3px; }
+.ms-obj { display: grid; grid-template-columns: 16px 1fr; gap: 0 6px; line-height: 1.3; }
+.ms-obj .ms-ic { color: var(--amber); text-align: center; }
+.ms-obj .ms-txt { color: var(--text); }
+.ms-obj .ms-det { grid-column: 2; font-size: 10.5px; color: var(--dim); }
+.ms-obj .ms-bar { grid-column: 2; height: 3px; background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line-dim); margin-top: 2px; }
+.ms-obj .ms-bar > i { display: block; height: 100%; background: var(--amber); }
+.ms-obj.done .ms-ic { color: var(--good); }
+.ms-obj.done .ms-txt { color: var(--good); text-decoration: line-through; text-decoration-color: rgba(121, 194, 92, 0.5); }
+.ms-obj.done .ms-bar > i { background: var(--good); }
+.ms-obj.failed .ms-ic, .ms-obj.failed .ms-txt { color: var(--bad); }
+.ms-obj.failed .ms-bar > i { background: var(--bad); }
+.ms-obj.constraint .ms-ic { color: var(--blue); }
+.ms-obj.sub { margin-left: 14px; font-size: 11px; }
+.ms-obj.secondary .ms-txt { color: var(--khaki); }
+.ms-result { text-align: center; font-size: 14px; letter-spacing: 0.2em; padding: 2px 0; }
+.ms-result.victory { color: var(--good); }
+.ms-result.defeat { color: var(--bad); }
+
+/* ---- Tutorial-Karte ---- */
+.tut-layer { z-index: 7; }
+.tut-card {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(470px, calc(100vw - 24px));
+  border-color: var(--amber);
+}
+.tut-card.bl { top: auto; bottom: 230px; left: 14px; transform: none; }
+.tut-body { padding: 8px 12px; font-size: 12.5px; line-height: 1.45; color: var(--text); }
+.tut-steps { display: flex; gap: 3px; padding: 0 12px 6px; }
+.tut-steps i { flex: 1; height: 3px; background: rgba(0, 0, 0, 0.5); border: 1px solid var(--line-dim); }
+.tut-steps i.done { background: var(--good); border-color: var(--good); }
+.tut-steps i.cur { background: var(--amber); border-color: var(--amber-hi); }
+.tut-foot { display: flex; gap: 6px; justify-content: flex-end; padding: 0 12px 8px; }
+.tut-wait { flex: 1; align-self: center; color: var(--dim); font-size: 10.5px; letter-spacing: 0.08em; }
+.tut-wait::before { content: '◌ '; color: var(--amber); animation: blink 1s steps(2) infinite; }
+.tut-pulse {
+  position: fixed;
+  pointer-events: none !important;
+  z-index: 6;
+  border: 2px solid var(--amber-hi);
+  box-shadow: 0 0 12px rgba(255, 199, 90, 0.7), inset 0 0 10px rgba(255, 199, 90, 0.25);
+  animation: tut-pulse 1.1s ease-in-out infinite;
+}
+.tut-pulse.frame { inset: 6px; width: auto !important; height: auto !important; left: 6px !important; top: 6px !important; border-style: dashed; opacity: 0.5; }
+@keyframes tut-pulse { 0%, 100% { opacity: 0.35; transform: scale(1); } 50% { opacity: 1; transform: scale(1.04); } }
+
+/* ---- Endbildschirm ---- */
+.es-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.82));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: es-in 0.7s ease-out;
+}
+@keyframes es-in { from { opacity: 0; } to { opacity: 1; } }
+.es-panel { width: min(640px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; }
+.es-title {
+  text-align: center;
+  font-size: 54px;
+  letter-spacing: 0.3em;
+  padding: 14px 0 2px 0.3em;
+  text-shadow: 3px 3px 0 #000, 0 0 24px currentColor;
+}
+.es-overlay.victory .es-title { color: var(--good); }
+.es-overlay.defeat .es-title { color: var(--bad); }
+.es-mission { text-align: center; color: var(--amber); text-transform: uppercase; letter-spacing: 0.16em; font-size: 12px; }
+.es-reason { text-align: center; color: var(--text); padding: 6px 18px 10px; font-size: 13px; }
+.es-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; padding: 0 16px 10px; }
+.es-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.es-table td { padding: 3px 0; border-bottom: 1px dashed var(--line-dim); }
+.es-table td:last-child { text-align: right; color: var(--amber-hi); }
+.es-table td.bad:last-child { color: var(--bad); }
+.es-objs { font-size: 11.5px; display: flex; flex-direction: column; gap: 3px; }
+.es-objs .ok { color: var(--good); }
+.es-objs .no { color: var(--bad); }
+.es-objs .sec { color: var(--khaki); }
+.es-sect { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin: 0 0 4px; }
+.es-buttons { display: flex; gap: 8px; padding: 6px 16px 16px; justify-content: center; flex-wrap: wrap; }
+.es-buttons .btn { padding: 8px 16px; font-size: 13px; letter-spacing: 0.12em; }
+@media (max-width: 560px) { .es-cols { grid-template-columns: 1fr; } .es-title { font-size: 38px; } }
+
+/* ---- Kampagnenmenü (Modal im Hauptmenü) ---- */
+.camp-modal { width: min(760px, calc(100vw - 24px)); }
+.camp-body { display: grid; grid-template-columns: 250px 1fr; gap: 0; min-height: 300px; }
+.camp-list { border-right: 1px solid var(--line-dim); display: flex; flex-direction: column; }
+.camp-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px; align-items: center; padding: 7px 10px; border-bottom: 1px dashed var(--line-dim); cursor: pointer; }
+.camp-row:hover:not(.locked) { background: var(--panel-hi); }
+.camp-row.sel { background: rgba(227, 165, 52, 0.18); box-shadow: inset 3px 0 0 var(--amber); }
+.camp-row .n { color: var(--dim); }
+.camp-row .nm { color: var(--text); text-transform: uppercase; letter-spacing: 0.05em; font-size: 12px; }
+.camp-row .st { font-size: 12px; }
+.camp-row.done .st { color: var(--good); }
+.camp-row.open .st { color: var(--amber); }
+.camp-row.locked { opacity: 0.5; cursor: not-allowed; }
+.camp-detail { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.camp-detail h3 { margin: 0; font-weight: normal; font-size: 17px; color: var(--amber-hi); letter-spacing: 0.1em; text-transform: uppercase; }
+.camp-meta { font-size: 11px; color: var(--dim); letter-spacing: 0.06em; }
+.camp-brief { font-size: 12px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.camp-brief li { padding-left: 14px; position: relative; margin-bottom: 4px; }
+.camp-brief li::before { content: '▸'; position: absolute; left: 0; color: var(--amber); }
+.camp-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: auto; }
+@media (max-width: 640px) { .camp-body { grid-template-columns: 1fr; } .camp-list { border-right: none; border-bottom: 1px solid var(--line-dim); } }

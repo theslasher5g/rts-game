@@ -4,7 +4,7 @@ import type { UnitManager } from '../units/UnitManager';
 import type { Unit, UnitCategory, UnitTypeDef } from '../units/types';
 import { FORMATION_NAMES } from '../units/types';
 import { UNIT_TYPES } from '../units/unitTypes';
-import { BUILD_CHOICES } from '../control/CombatControls';
+import { BUILD_CHOICES, capabilitiesOf, type CapKey } from '../control/CombatControls';
 import { START_PROFILES } from '../game/countryData';
 
 /**
@@ -32,20 +32,18 @@ const CATEGORY_NAMES: Record<UnitCategory, string> = {
 };
 const CATEGORY_ORDER: UnitCategory[] = ['infantry', 'recon', 'ifv', 'tank', 'artillery', 'aa', 'support', 'helicopter', 'jet', 'drone', 'naval'];
 
-/** Verbandsbezeichnung je Kategorie [Singular, Plural] */
-const ECHELON: Record<UnitCategory, [string, string]> = {
-  infantry: ['Trupp', 'Trupps'],
-  recon: ['Spähtrupp', 'Spähtrupps'],
-  ifv: ['Zug', 'Züge'],
-  tank: ['Zug', 'Züge'],
-  artillery: ['Batterie', 'Batterien'],
-  aa: ['Zug', 'Züge'],
-  support: ['Zug', 'Züge'],
-  helicopter: ['Schwarm', 'Schwärme'],
-  jet: ['Rotte', 'Rotten'],
-  drone: ['Schwarm', 'Schwärme'],
-  naval: ['Schiff', 'Schiffe'],
-};
+/** Bezeichnung der Einheit [Singular, Plural]: Infanterie = Trupp, FPV = Schwarm, alles andere = Einzelfahrzeug */
+function echelonOf(t: UnitTypeDef): [string, string] {
+  if (t.memberCount > 1) return t.model === 'soldier' ? ['Trupp', 'Trupps'] : ['Schwarm', 'Schwärme'];
+  switch (t.category) {
+    case 'helicopter': return ['Hubschrauber', 'Hubschrauber'];
+    case 'jet': return ['Flugzeug', 'Flugzeuge'];
+    case 'drone': return ['Drohne', 'Drohnen'];
+    case 'naval': return ['Schiff', 'Schiffe'];
+    case 'infantry': return ['Trupp', 'Trupps'];
+    default: return ['Fahrzeug', 'Fahrzeuge'];
+  }
+}
 
 /** Kategorie-Symbol (NATO-ähnlich, Text) */
 const CATEGORY_ICON: Record<UnitCategory, string> = {
@@ -64,6 +62,8 @@ const CATEGORY_ICON: Record<UnitCategory, string> = {
 
 interface DetailRefs {
   unit: Unit;
+  crew: HTMLElement;
+  crewBar: HTMLElement;
   hp: HTMLElement;
   hpBar: HTMLElement;
   fuel: HTMLElement;
@@ -90,6 +90,8 @@ export class UnitPanel {
   private readonly selArea: HTMLDivElement;
   private readonly formBtns = new Map<string, HTMLButtonElement>();
   private readonly modeBtns = new Map<string, HTMLButtonElement>();
+  private readonly capBtns: Array<[CapKey, HTMLButtonElement]> = [];
+  private fRow!: HTMLDivElement;
   private readonly groupBtns: HTMLButtonElement[] = [];
   private readonly groupRow: HTMLDivElement;
   private readonly spawnBtn: HTMLButtonElement;
@@ -146,33 +148,30 @@ export class UnitPanel {
     const oRow = el('div', 'up-row');
     oRow.appendChild(el('span', 'up-lbl', 'Befehle'));
     const oBtns = el('div', 'up-btns up-orders');
-    const mk = (label: string, key: string, tip: string, fn: () => void, modeKey?: string) => {
+    const mk = (cap: CapKey, label: string, key: string, tip: string, fn: () => void, modeKey?: string) => {
       const b = btn('', 'btn btn-sm up-order');
       b.append(document.createTextNode(label), el('kbd', '', key));
       b.title = tip;
       b.addEventListener('click', fn);
       oBtns.appendChild(b);
       if (modeKey) this.modeBtns.set(modeKey, b);
+      this.capBtns.push([cap, b]);
       return b;
     };
-    mk(ORDER_NAMES.move, 'RMT', 'Bewegen: Rechtsklick auf Karte (Shift: Wegpunkt, Rechts-Ziehen: Front & Blickrichtung) – oder hier klicken, dann Linksklick', () => this.toggleMode('move'), 'move');
-    mk('Angriff', 'G', 'Angriffsbewegung (G, oder Strg+Rechtsklick): bewegen und unterwegs Feinde bekämpfen', () => this.toggleMode('attackMove'), 'attackMove');
-    mk(ORDER_NAMES.reverse, 'V', 'Rückwärts fahren (V, dann Linksklick) – Front bleibt zum Feind', () => this.toggleMode('reverse'), 'reverse');
-    mk(ORDER_NAMES.patrol, 'B', 'Patrouille (B, dann Linksklick; Shift: weitere Punkte)', () => this.toggleMode('patrol'), 'patrol');
-    mk(ORDER_NAMES.hold, 'Y', 'Stellung halten (Y)', () => this.ctl.hold());
-    mk(ORDER_NAMES.stop, 'T', 'Stopp: alle Befehle löschen (T)', () => this.ctl.stop());
-    mk('Feuer', 'K', 'Feuerbefehl (K, dann Linksklick): Artillerie, Mörser, Raketenwerfer und Kampfpanzer feuern auf einen Punkt', () => this.toggleMode('fireAt'), 'fireAt');
-    mk('Gebäude', 'N', 'Gebäude besetzen (N, dann Gebäude anklicken): Deckungs- und Sichtbonus', () => this.toggleMode('garrison'), 'garrison');
-    mk('Räumen', 'X', 'Gebäude verlassen (X)', () => this.ctl.cc.ungarrison());
-    mk('Bauen', 'C', 'Pioniere: Graben, Sandsäcke, Panzersperren, Bunker … (Palette öffnen)', () => this.toggleBuild(), 'build');
-    mk('Sprengen', 'J', 'Brücke sprengen (J, dann Brücke anklicken) – Pioniere nötig', () => this.toggleMode('demolish'), 'demolish');
-    mk('Reparieren', 'L', 'Brücke reparieren (L, dann Brücke anklicken) – Pioniere nötig', () => this.toggleMode('repair'), 'repair');
-    const ph = btn('Eskorte', 'btn btn-sm up-order is-disabled');
-    ph.title = 'Eskorte – folgt in einer späteren Phase';
-    ph.setAttribute('aria-disabled', 'true');
-    ph.addEventListener('click', () => this.ctl.toast('Eskorte – folgt in einer späteren Phase', 'info'));
-    oBtns.appendChild(ph);
+    mk('move', ORDER_NAMES.move, 'RMT', 'Bewegen: Rechtsklick auf Karte (Shift: Wegpunkt, Rechts-Ziehen: Front & Blickrichtung) – oder hier klicken, dann Linksklick', () => this.toggleMode('move'), 'move');
+    mk('attackMove', 'Angriff', 'G', 'Angriffsbewegung (G, oder Strg+Rechtsklick): bewegen und unterwegs Feinde bekämpfen', () => this.toggleMode('attackMove'), 'attackMove');
+    mk('reverse', ORDER_NAMES.reverse, 'V', 'Rückwärts fahren (V, dann Linksklick) – Front bleibt zum Feind', () => this.toggleMode('reverse'), 'reverse');
+    mk('patrol', ORDER_NAMES.patrol, 'B', 'Patrouille (B, dann Linksklick; Shift: weitere Punkte)', () => this.toggleMode('patrol'), 'patrol');
+    mk('hold', ORDER_NAMES.hold, 'Y', 'Stellung halten (Y)', () => this.ctl.hold());
+    mk('stop', ORDER_NAMES.stop, 'T', 'Stopp: alle Befehle löschen (T)', () => this.ctl.stop());
+    mk('fireAt', 'Feuer', 'K', 'Feuerbefehl (K, dann Linksklick): Artillerie, Mörser, Raketenwerfer und Kampfpanzer feuern auf einen Punkt', () => this.toggleMode('fireAt'), 'fireAt');
+    mk('garrison', 'Gebäude', 'N', 'Nur Infanterie: Gebäude besetzen (N, dann Gebäude anklicken): Deckungs- und Sichtbonus', () => this.toggleMode('garrison'), 'garrison');
+    mk('ungarrison', 'Räumen', 'X', 'Nur Infanterie: Gebäude verlassen (X)', () => this.ctl.cc.ungarrison());
+    mk('build', 'Bauen', 'C', 'Nur Pioniere: Graben, Sandsäcke, Panzersperren, Bunker … (Palette öffnen)', () => this.toggleBuild(), 'build');
+    mk('demolish', 'Sprengen', 'J', 'Nur Pioniere: Brücke sprengen (J, dann Brücke anklicken)', () => this.toggleMode('demolish'), 'demolish');
+    mk('repair', 'Reparieren', 'L', 'Nur Pioniere: Brücke reparieren (L, dann Brücke anklicken)', () => this.toggleMode('repair'), 'repair');
     oRow.appendChild(oBtns);
+    this.fRow = fRow;
     cmd.append(fRow, oRow);
 
     body.append(this.selArea, cmd);
@@ -200,7 +199,8 @@ export class UnitPanel {
     const keys = el('div', 'up-keys');
     keys.textContent = 'LMT Auswahl · Shift +/− · Doppelklick Typ · Strg+A alle · RMT Bewegen · Strg+RMT Angriff · Esc Abbruch';
     this.spawnBtn = btn('+ Einheit', 'btn btn-sm up-spawn-btn');
-    this.spawnBtn.title = 'Testmodus: Einheiten für die eigene Nation platzieren (bis zur Produktion in Phase 5)';
+    this.spawnBtn.title = 'Debug: Einheiten für die eigene Nation platzieren (nur mit localStorage ww3.debug=1)';
+    this.spawnBtn.classList.add('hidden');
     this.spawnBtn.addEventListener('click', () => this.toggleSpawn());
     foot.append(this.groupRow, keys, this.spawnBtn);
 
@@ -227,7 +227,7 @@ export class UnitPanel {
       for (const t of arr) {
         const b = btn('', 'btn btn-sm up-spawn-type');
         b.append(el('b', '', t.short), el('span', '', t.name));
-        b.title = `${t.name} · ${t.memberCount}× · ${fmtNum(t.cost, 0)} Mio $ – Klick, dann Linksklick auf Karte (Shift: mehrere)`;
+        b.title = `${t.name}${t.memberCount > 1 ? ` · ${t.memberCount}×` : ''} · ${fmtNum(t.cost, 0)} Mio $ – Klick, dann Linksklick auf Karte (Shift: mehrere)`;
         b.addEventListener('click', () => {
           if (this.ctl.mode === 'spawn' && this.ctl.spawnTypeId === t.id) this.ctl.cancelMode();
           else this.ctl.beginSpawn(t.id);
@@ -286,6 +286,7 @@ export class UnitPanel {
     }
     this.build.append(bh, bb);
 
+    this.ctl.onToggleBuild = () => this.toggleBuild();
     this.panel.append(this.spawn, this.build);
     this.layer.appendChild(this.panel);
     root.appendChild(this.layer);
@@ -349,6 +350,15 @@ export class UnitPanel {
     this.hint.classList.toggle('hidden', has);
     this.main.classList.toggle('hidden', !has);
 
+    // Kontextabhängige Befehle: Button nur, wenn mindestens eine ausgewählte Einheit den Befehl nutzen kann
+    const caps = capabilitiesOf(sel);
+    for (const [k, b] of this.capBtns) b.classList.toggle('hidden', !caps[k]);
+    this.fRow.classList.toggle('hidden', sel.length < 2);
+    if (!caps.build) this.toggleBuild(false);
+    const dbg = ctl.debug;
+    this.spawnBtn.classList.toggle('hidden', !dbg);
+    if (!dbg) this.toggleSpawn(false);
+
     // Formation / Modus
     this.formBtns.forEach((b, f) => b.classList.toggle('active', f === ctl.formation));
     this.modeBtns.forEach((b, m) => b.classList.toggle('active', m === ctl.mode));
@@ -375,7 +385,7 @@ export class UnitPanel {
     const ech = new Map<string, number>();
     let members = 0;
     for (const u of sel) {
-      const e = ECHELON[u.type.category] ?? ['Verband', 'Verbände'];
+      const e = echelonOf(u.type);
       ech.set(e[0] + '|' + e[1], (ech.get(e[0] + '|' + e[1]) ?? 0) + 1);
       members += u.type.memberCount;
     }
@@ -385,7 +395,7 @@ export class UnitPanel {
       parts.push(`${n} ${n === 1 ? s : p}`);
     });
     this.headTitle.textContent = sel.length === 1 ? sel[0].name || sel[0].type.name : `Verband · ${sel.length} Einheiten`;
-    this.headInfo.textContent = `${parts.join(' · ')} · ${members} Fz/Mann`;
+    this.headInfo.textContent = `${parts.join(' · ')}${members !== sel.length ? ` · ${members} Mann` : ''}`;
 
     const sig = sel
       .map((u) => u.id)
@@ -441,7 +451,7 @@ export class UnitPanel {
     const top = el('div', 'up-d-top');
     top.append(el('span', 'up-d-ic', CATEGORY_ICON[t.category] ?? '■'));
     const nm = el('div', 'up-d-name');
-    nm.append(el('b', '', t.name), el('span', 'muted', ` · ${t.short} · ${t.memberCount}× · ${CATEGORY_NAMES[t.category] ?? t.category}`));
+    nm.append(el('b', '', u.name || t.name), el('span', 'muted', ` · ${t.name} · ${t.memberCount > 1 ? `${t.memberCount}× · ` : ''}${CATEGORY_NAMES[t.category] ?? t.category}`));
     top.appendChild(nm);
 
     const grid = el('div', 'up-d-grid');
@@ -459,6 +469,7 @@ export class UnitPanel {
     const [fuel, fuelBar] = bar('Treibst.');
     const [ammo, ammoBar] = bar('Munition');
     const [morale, moraleBar] = bar('Moral');
+    const [crew, crewBar] = bar(t.memberCount > 1 ? 'Mannschaft' : 'Besatzung');
 
     const kv = el('div', 'kv up-d-kv');
     const exp = el('span', '', '');
@@ -470,7 +481,7 @@ export class UnitPanel {
     const cols = el('div', 'up-d-cols');
     cols.append(grid, kv);
     area.append(top, cols);
-    this.detail = { unit: u, hp, hpBar, fuel, fuelBar, ammo, ammoBar, morale, moraleBar, exp, speed, order, eta };
+    this.detail = { unit: u, crew, crewBar, hp, hpBar, fuel, fuelBar, ammo, ammoBar, morale, moraleBar, exp, speed, order, eta };
   }
 
   private renderValues(): void {
@@ -484,6 +495,15 @@ export class UnitPanel {
       else setBar(d.fuel, d.fuelBar, 1, 1, '∞');
       setBar(d.ammo, d.ammoBar, u.ammo, t.ammo, `${Math.round(u.ammo)}/${t.ammo}`);
       setBar(d.morale, d.moraleBar, u.morale, 1, `${Math.round(u.morale * 100)}%`);
+      {
+        const n = t.memberCount;
+        const alive = Math.max(0, Math.min(n, Math.ceil(u.membersAlive ?? n)));
+        const f = t.hp > 0 ? u.hp / t.hp : 1;
+        const state = u.hp <= 0 ? 'zerstört' : f > 0.66 ? 'einsatzbereit' : f > 0.33 ? 'beschädigt' : 'schwer beschädigt';
+        const sup = (u.suppression ?? 0) > 0.4 ? ' · niedergehalten' : '';
+        if (n > 1) setBar(d.crew, d.crewBar, alive, n, `${alive}/${n} Mann${u.wounded ? ` (${u.wounded} verw.)` : ''}${sup}`);
+        else setBar(d.crew, d.crewBar, f, 1, `${state}${sup}`);
+      }
       setText(d.exp, expLabel(u.experience));
       setText(d.speed, `${Math.round(u.speedKmh)} km/h`);
       setText(d.order, orderLabel(u));

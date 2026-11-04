@@ -3,8 +3,8 @@ import { DEFAULT_SETTINGS, type Settings } from '../core/types';
 
 const STORAGE_KEY = 'ww3.settings';
 
-type NumKey = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
-type BoolKey = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
+type NumKey = { [K in keyof Settings]-?: Settings[K] extends number ? K : never }[keyof Settings];
+type BoolKey = { [K in keyof Settings]-?: NonNullable<Settings[K]> extends boolean ? K : never }[keyof Settings];
 
 type Control =
   | { kind: 'range'; key: NumKey; label: string; desc: string; min: number; max: number; step: number; fmt: (v: number) => string }
@@ -21,6 +21,7 @@ const CONTROLS: Control[] = [
   { kind: 'bool', key: 'showLabels', label: 'Ländernamen', desc: 'Beschriftungen auf der Karte' },
   { kind: 'bool', key: 'showCities', label: 'Städte', desc: 'Städte und Hauptstädte anzeigen' },
   { kind: 'bool', key: 'showRoads', label: 'Straßen & Schienen', desc: 'Straßen-, Schienen- und Fährnetz anzeigen' },
+  { kind: 'bool', key: 'fogOfWar', label: 'Nebel des Krieges', desc: 'Gegner nur im Sichtbereich eigener Einheiten sehen' },
 ];
 
 /** Lädt gespeicherte Einstellungen (localStorage) über DEFAULT_SETTINGS. */

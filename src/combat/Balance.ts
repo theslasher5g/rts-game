@@ -17,7 +17,7 @@ export const BALANCE = {
   /** Schadensfaktor gegen eigene/neutrale Einheiten bei Splitterschaden */
   FRIENDLY_FIRE: 0.5,
   /** Mindest-Zielwert, damit automatisch gefeuert wird */
-  MIN_SCORE: 0.004,
+  MIN_SCORE: 0.0025,
   /** Wahrscheinlichkeit der Munitionsexplosion eines zerstörten Fahrzeugs mit Restmunition */
   COOKOFF_CHANCE: 0.35,
   /** Erfahrung je Abschuss */

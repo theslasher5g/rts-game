@@ -3,6 +3,8 @@ import { getProfile, getRelation, relationClass, relationLabel, START_PROFILES, 
 import { SCENARIO_NAME, SCENARIO_NATIONS } from '../game/scenario';
 import type { GeoData } from '../world/GeoData';
 import { SettingsPanel } from './SettingsPanel';
+import { CampaignMenu } from './MissionPanel';
+import { getMission } from '../game/missions/campaign';
 
 const SEED_KEY = 'ww3.seed';
 
@@ -98,7 +100,20 @@ export class MainMenu {
     setBtn.className = 'btn';
     setBtn.textContent = '⚙ Einstellungen';
     setBtn.addEventListener('click', () => SettingsPanel.instance?.toggle());
-    sb.append(seedRow, note, this.startBtn, this.hint, setBtn);
+    // Phase 6: Kampagne (Missionen mit Briefing, Freischaltung in localStorage 'ww3.campaign')
+    const campBtn = document.createElement('button');
+    campBtn.className = 'btn';
+    campBtn.textContent = '★ Kampagne (7 Missionen)';
+    const camp = new CampaignMenu(root);
+    campBtn.addEventListener('click', () => camp.open());
+    camp.onStart = (missionId) => {
+      const m = getMission(missionId);
+      if (!m) return;
+      this.commitSeed(false);
+      bus.emit('game:start', { countryA3: m.playerNation, missionId });
+      this.hide();
+    };
+    sb.append(seedRow, note, this.startBtn, campBtn, this.hint, setBtn);
     side.append(sh, sb);
 
     // Nationen-Karten (unten)

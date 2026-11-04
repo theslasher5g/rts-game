@@ -1,5 +1,5 @@
 import type { StructureKind } from '../combat/types';
-import { COMBAT_MODES, CombatControls, type CombatMode } from './CombatControls';
+import { CAP_REFUSAL, COMBAT_MODES, CombatControls, capabilitiesOf, capabilitiesOfType, type CapKey, type CombatMode } from './CombatControls';
 import * as THREE from 'three';
 import { bus } from '../core/EventBus';
 import type { Input, InputDragEvent } from '../core/Input';
@@ -90,7 +90,8 @@ const ORDER_COLORS: Record<OrderKind, [number, number, number]> = {
 const GHOST_COLOR: [number, number, number] = [1.0, 0.78, 0.35];
 const GHOST_DIM: [number, number, number] = [0.85, 0.62, 0.25];
 
-const MIN_PICK_PX = 10;
+/** Mindest-Klickradius (px) um eine Einheit: großzügig, damit auch kleine/ferne Einheiten sicher treffbar sind */
+const MIN_PICK_PX = 26;
 const GROUP_DOUBLE_TAP_MS = 300;
 /** Mindest-Zieh-Länge (px) für Formationsziehen; darunter: nur Blickrichtung ab Startpunkt */
 const MIN_FORMATION_DRAG_PX = 14;
@@ -138,6 +139,33 @@ export class SelectionController {
   /** Testmodus: Besitzer gespawnter Einheiten (null = eigene Nation) */
   testOwner: string | null = null;
 
+  /**
+   * Optionaler Sichtbarkeitsfilter (Nebel des Krieges): unsichtbare Einheiten sind weder anklickbar noch Hover-Ziel.
+   * Eigene Einheiten sind immer pickbar.
+   */
+  isUnitVisible?: (u: Unit) => boolean;
+
+  private _debug = false;
+  /** Debug-/Testwerkzeuge (Einheiten platzieren): per ctl.debug = true oder localStorage['ww3.debug'] === '1' */
+  get debug(): boolean {
+    if (this._debug) return true;
+    try {
+      return localStorage.getItem('ww3.debug') === '1';
+    } catch {
+      return false;
+    }
+  }
+  set debug(v: boolean) {
+    this._debug = v;
+    this.version++;
+  }
+
+  /** Vom UnitPanel gesetzt: Bau-Palette öffnen/schließen (Taste C) */
+  onToggleBuild: (() => void) | null = null;
+
+  /** Einheit unter dem Mauszeiger (Hover) */
+  hovered: Unit | null = null;
+
   private _mode: TargetMode = 'none';
   private spawnType: string | null = null;
 
@@ -154,6 +182,11 @@ export class SelectionController {
   private readonly box: HTMLDivElement;
   private readonly toastWrap: HTMLDivElement;
   private readonly modeHint: HTMLDivElement;
+  private readonly hoverRing: HTMLDivElement;
+  private readonly hoverTip: HTMLDivElement;
+  private mouseX = -1;
+  private mouseY = -1;
+  private mouseIn = false;
 
   // Rahmenauswahl
   private boxActive = false;
@@ -211,7 +244,26 @@ export class SelectionController {
     this.toastWrap.className = 'ctl-toasts';
     this.modeHint = document.createElement('div');
     this.modeHint.className = 'ctl-mode hidden';
-    this.uiRoot.append(this.box, this.toastWrap, this.modeHint);
+    this.hoverRing = document.createElement('div');
+    this.hoverRing.className = 'ctl-hover hidden';
+    this.hoverTip = document.createElement('div');
+    this.hoverTip.className = 'ctl-tip hidden';
+    this.uiRoot.append(this.box, this.toastWrap, this.modeHint, this.hoverRing, this.hoverTip);
+    const onMouse = (e: PointerEvent) => {
+      const r = this.canvas.getBoundingClientRect();
+      this.mouseX = e.clientX - r.left;
+      this.mouseY = e.clientY - r.top;
+      this.mouseIn = true;
+    };
+    const onLeave = () => {
+      this.mouseIn = false;
+    };
+    this.canvas.addEventListener('pointermove', onMouse);
+    this.canvas.addEventListener('pointerleave', onLeave);
+    this.cleanup.push(
+      () => this.canvas.removeEventListener('pointermove', onMouse),
+      () => this.canvas.removeEventListener('pointerleave', onLeave),
+    );
 
     // ---------- Eingaben
     const inp = this.input;
@@ -365,6 +417,7 @@ export class SelectionController {
       this.toast('Keine Einheiten ausgewählt', 'warn');
       return;
     }
+    if (m !== 'move' && !this.requireCap(m as CapKey)) return;
     this._mode = m;
     this.spawnType = null;
     this.updateModeUi();
@@ -409,9 +462,34 @@ export class SelectionController {
 
   /** Bewegungsbefehl an Auswahl (Panel/Minikarte nutzbar) */
   issueMoveTo(x: number, z: number, opts: MoveOptions = {}): void {
-    const ids = this.commandIds();
+    let ids = this.commandIds();
     if (!ids.length) return;
     const o: MoveOptions = { formation: this.formation, ...opts };
+    const kind = o.kind;
+    if (kind === 'reverse' || kind === 'attackMove' || kind === 'patrol') {
+      const ck: CapKey = kind;
+      const capable: number[] = [], others: number[] = [];
+      for (const id of ids) {
+        const u = this.units.get(id);
+        if (u && capabilitiesOfType(u.type)[ck]) capable.push(id);
+        else others.push(id);
+      }
+      if (!capable.length) {
+        this.toast(CAP_REFUSAL[ck], 'warn');
+        if (kind === 'reverse') return;
+      }
+      // Nicht befähigte Einheiten (z. B. Versorger bei Angriffsbewegung) fahren gewöhnlich zum Ziel
+      if (others.length && kind !== 'reverse') this.units.issueMove(others, x, z, { ...o, kind: 'move' });
+      ids = kind === 'reverse' ? capable : capable.length ? capable : [];
+      if (!ids.length) {
+        for (const id of others) {
+          const u = this.units.get(id);
+          const oo = u && u.orders.length ? u.orders[u.orders.length - 1] : undefined;
+          if (u && oo) this.pendingRoute.set(id, { order: oo, x0: u.x, z0: u.z });
+        }
+        return;
+      }
+    }
     this.units.issueMove(ids, x, z, o);
     for (const id of ids) {
       const u = this.units.get(id);
@@ -520,6 +598,7 @@ export class SelectionController {
     }
 
     this.rebuildLines();
+    this.updateHover();
   }
 
   dispose(): void {
@@ -528,6 +607,8 @@ export class SelectionController {
     this.box.remove();
     this.toastWrap.remove();
     this.modeHint.remove();
+    this.hoverRing.remove();
+    this.hoverTip.remove();
     this.lineGeom.dispose();
     (this.lines.material as THREE.Material).dispose();
   }
@@ -605,21 +686,39 @@ export class SelectionController {
 
   /** Feindliche (laut War) Einheit unter dem Mauszeiger */
   private pickEnemyAt(px: number, py: number): Unit | null {
-    return this.pickUnitWhere(px, py, (u) => !u.garrisonId && this.cc.isHostileOwner(u.owner));
+    return this.pickUnitWhere(px, py, (u) => this.cc.isHostileOwner(u.owner));
   }
 
+  private readonly anchor: [number, number, number] = [0, 0, 0];
+
+  /** Einheit kann angeklickt werden: lebt, nicht in Gebäude/Fahrzeug besetzt, nicht im Nebel */
+  private pickable(u: Unit): boolean {
+    if (u.hp <= 0 || u.garrisonId) return false;
+    if (!this.isOwn(u) && this.isUnitVisible && !this.isUnitVisible(u)) return false;
+    return true;
+  }
+
+  /**
+   * Picking: Einheitenmittelpunkt (so wie gezeichnet) wird projiziert; Trefferradius =
+   * max(MIN_PICK_PX, projizierter Umkreis aller Mitglieder inkl. Zoomfaktor). Bei Überlappung gewinnt der nächste
+   * Mittelpunkt; bei Gleichstand (< 1 px) die Einheit mit dem kleineren Radius (vorne liegende kleine Einheit).
+   */
   private pickUnitWhere(px: number, py: number, accept: (u: Unit) => boolean): Unit | null {
     if (!this.playerA3) return null;
     let best: Unit | null = null;
     let bestD = Infinity;
-    const p = this.projOut;
+    let bestR = Infinity;
+    const p = this.projOut, a = this.anchor;
     for (const u of this.units.units) {
-      if (!accept(u)) continue;
-      if (!this.project(u.x, u.y, u.z, p)) continue;
-      const r = Math.max(MIN_PICK_PX, this.unitRenderer.visualRadiusKm(u) * this.pxPerKm(p[2]));
+      if (!this.pickable(u) || !accept(u)) continue;
+      this.unitRenderer.pickAnchor(u, a);
+      if (!this.project(a[0], a[1], a[2], p)) continue;
+      const r = Math.max(MIN_PICK_PX, this.unitRenderer.pickRadiusKm(u) * this.pxPerKm(p[2]));
       const d = Math.hypot(p[0] - px, p[1] - py);
-      if (d <= r && d < bestD) {
+      if (d > r) continue;
+      if (d < bestD - 1 || (Math.abs(d - bestD) <= 1 && r < bestR)) {
         bestD = d;
+        bestR = r;
         best = u;
       }
     }
@@ -630,10 +729,11 @@ export class SelectionController {
     const out: Unit[] = [];
     if (!this.playerA3) return out;
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
-    const p = this.projOut;
+    const p = this.projOut, a = this.anchor;
     for (const u of this.units.units) {
-      if (!this.isOwn(u)) continue;
-      if (!this.project(u.x, u.y, u.z, p)) continue;
+      if (!this.isOwn(u) || !this.pickable(u)) continue;
+      this.unitRenderer.pickAnchor(u, a);
+      if (!this.project(a[0], a[1], a[2], p)) continue;
       if (p[0] >= 0 && p[1] >= 0 && p[0] <= w && p[1] <= h) out.push(u);
     }
     return out;
@@ -642,15 +742,54 @@ export class SelectionController {
   private unitsInScreenRect(x0: number, y0: number, x1: number, y1: number): number[] {
     const out: number[] = [];
     if (!this.playerA3) return out;
-    const p = this.projOut;
+    const p = this.projOut, a = this.anchor;
     for (const u of this.units.units) {
-      if (!this.isOwn(u)) continue;
-      if (!this.project(u.x, u.y, u.z, p)) continue;
+      if (!this.isOwn(u) || !this.pickable(u)) continue;
+      this.unitRenderer.pickAnchor(u, a);
+      if (!this.project(a[0], a[1], a[2], p)) continue;
       // Rahmen schließt Einheiten ein, deren Symbol den Rahmen berührt
       const r = Math.min(8, Math.max(2, this.unitRenderer.visualRadiusKm(u) * this.pxPerKm(p[2]) * 0.5));
       if (p[0] + r >= x0 && p[0] - r <= x1 && p[1] + r >= y0 && p[1] - r <= y1) out.push(u.id);
     }
     return out;
+  }
+
+  /** Hover: Ring + kleines Etikett (Name · Typ · Zustand) an der Einheit unter dem Zeiger */
+  private updateHover(): void {
+    let h: Unit | null = null;
+    const busy = this.boxActive || this.fdrag !== null;
+    if (this._enabled && this.mouseIn && !busy && this.playerA3) {
+      h = this.pickUnitWhere(this.mouseX, this.mouseY, (u) => this.isOwn(u) || this.cc.isHostileOwner(u.owner));
+    }
+    this.hovered = h;
+    if (!h) {
+      this.hoverRing.classList.add('hidden');
+      this.hoverTip.classList.add('hidden');
+      return;
+    }
+    const a = this.anchor, p = this.projOut;
+    this.unitRenderer.pickAnchor(h, a);
+    if (!this.project(a[0], a[1], a[2], p)) {
+      this.hoverRing.classList.add('hidden');
+      this.hoverTip.classList.add('hidden');
+      return;
+    }
+    const cr = this.canvas.getBoundingClientRect(), ur = this.uiRoot.getBoundingClientRect();
+    const ox = cr.left - ur.left, oy = cr.top - ur.top;
+    const r = Math.max(14, Math.min(40, this.unitRenderer.pickRadiusKm(h) * this.pxPerKm(p[2]) * 0.6));
+    const enemy = !this.isOwn(h);
+    const rs = this.hoverRing.style;
+    rs.left = `${ox + p[0] - r}px`;
+    rs.top = `${oy + p[1] - r}px`;
+    rs.width = rs.height = `${r * 2}px`;
+    this.hoverRing.className = `ctl-hover${enemy ? ' enemy' : ''}`;
+    const hpf = h.type.hp > 0 ? Math.max(0, Math.round((h.hp / h.type.hp) * 100)) : 100;
+    const txt = `${h.name || h.type.name} · ${h.type.name} · ${hpf} %${enemy ? ' · Feind' : ''}`;
+    if (this.hoverTip.textContent !== txt) this.hoverTip.textContent = txt;
+    const ts = this.hoverTip.style;
+    ts.left = `${ox + p[0] + r + 6}px`;
+    ts.top = `${oy + p[1] - r}px`;
+    this.hoverTip.className = `ctl-tip${enemy ? ' enemy' : ''}`;
   }
 
   // ================================================================== intern: Eingaben
@@ -782,11 +921,6 @@ export class SelectionController {
       this.toast(`Angriff auf ${enemy.name || enemy.type.name}`, 'info', 1200);
       return;
     }
-    const own = this.pickUnitAt(e.x, e.y);
-    if (own && !this.sel.has(own.id)) {
-      this.toast('Eskorte – folgt in einer späteren Phase', 'info');
-      return;
-    }
     const hit = this.pickGround(e.x, e.y);
     if (!hit) return;
     this.issueMoveTo(hit.x, hit.z, { queue: e.shift, kind: e.ctrl ? 'attackMove' : 'move' });
@@ -847,6 +981,13 @@ export class SelectionController {
     this.modeHint.className = `ctl-mode mode-${m}`;
   }
 
+  /** Kann mindestens eine ausgewählte Einheit den Befehl? Sonst kurze Meldung (z. B. „Nur Pioniere können bauen“). */
+  requireCap(k: CapKey): boolean {
+    if (capabilitiesOf(this.selectedUnits().filter((u) => this.isOwn(u)))[k]) return true;
+    this.toast(CAP_REFUSAL[k], 'warn');
+    return false;
+  }
+
   private onKey(e: KeyboardEvent): void {
     if (!this._enabled || !this.playerA3) return;
     const t = e.target as HTMLElement | null;
@@ -899,15 +1040,15 @@ export class SelectionController {
     switch (code) {
       case 'KeyG':
         consume();
-        this.beginMode('attackMove');
+        if (this.requireCap('attackMove')) this.beginMode('attackMove');
         break;
       case 'KeyV':
         consume();
-        this.beginMode('reverse');
+        if (this.requireCap('reverse')) this.beginMode('reverse');
         break;
       case 'KeyB':
         consume();
-        this.beginMode('patrol');
+        if (this.requireCap('patrol')) this.beginMode('patrol');
         break;
       case 'KeyT':
         consume();
@@ -923,23 +1064,27 @@ export class SelectionController {
         break;
       case 'KeyK':
         consume();
-        this.beginMode('fireAt');
+        if (this.requireCap('fireAt')) this.beginMode('fireAt');
         break;
       case 'KeyN':
         consume();
-        this.beginMode('garrison');
+        if (this.requireCap('garrison')) this.beginMode('garrison');
         break;
       case 'KeyX':
         consume();
-        this.cc.ungarrison();
+        if (this.requireCap('ungarrison')) this.cc.ungarrison();
         break;
       case 'KeyJ':
         consume();
-        this.beginMode('demolish');
+        if (this.requireCap('demolish')) this.beginMode('demolish');
         break;
       case 'KeyL':
         consume();
-        this.beginMode('repair');
+        if (this.requireCap('repair')) this.beginMode('repair');
+        break;
+      case 'KeyC':
+        consume();
+        if (this.requireCap('build')) this.onToggleBuild?.();
         break;
       default:
         break;
