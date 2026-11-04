@@ -26,8 +26,8 @@ export interface ModelDef {
   size: number;
   /** zusätzliche Vergrößerung für Lesbarkeit */
   boost: number;
-  /** Rotoren: [x, y, z, Radius] in m */
-  rotors?: Array<[number, number, number, number]>;
+  /** Rotoren: [x, y, z, Radius, Achse] in m; Achse 'x' = senkrechte Heckrotor-Scheibe (Standard 'y' = Hauptrotor) */
+  rotors?: Array<[number, number, number, number, ('y' | 'x')?]>;
   /** Tarnfarbe: Boden / Luft / See */
   livery: 'ground' | 'air' | 'naval' | 'heli';
   /** Neigung am Hang */
