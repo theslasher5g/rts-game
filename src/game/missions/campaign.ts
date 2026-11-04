@@ -16,7 +16,7 @@ export const CAMPAIGN: MissionDef[] = [
       'LAGE: Kronland hat die Grenze überschritten, doch an deiner Front ist es noch ruhig. Deine Raffinerie wartet auf Öl.',
       'AUFTRAG: Lerne die Grundlagen und bringe 400 Fässer per Tankwagen-Konvoi zur Raffinerie.',
       'AUFTRAG: Optional – baue mit den Pionieren einen Schützengraben und errichte eine Kaserne.',
-      'HINWEIS: Öl ist die einzige Währung. Folge den Anweisungen unten links; Schritte lassen sich überspringen.',
+      'HINWEIS: Öl ist die einzige Währung. Folge den Anweisungen oben in der Mitte; Schritte lassen sich überspringen.',
     ],
     playerNation: 'VAL',
     enemies: ['KRN'],

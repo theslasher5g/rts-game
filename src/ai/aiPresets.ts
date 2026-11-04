@@ -75,7 +75,7 @@ export const AI_PRESETS: Record<Difficulty, AIPreset> = {
     raidGroups: 0, raidStartHours: 99, raidCooldown: 99, raidMinUnits: 99,
     sabotage: false, sabotageStartHours: 99, sabotageCooldown: 99, sabotageMaxEta: 0,
     fireMissions: false, airSorties: false, repairBridges: true, guardBridges: false, counters: false, engineers: 1,
-    reserveBarrels: 200, richBarrels: 700, unitCap: 45, produceCycle: 2.0, incomeBonus: 1,
+    reserveBarrels: 200, richBarrels: 700, unitCap: 105, produceCycle: 2.0, incomeBonus: 1,
   },
   mittel: {
     thinkHours: 0.5, maxOrders: 12, skipChance: 0.08, visionKm: 8, seeAll: false, seeTankers: true, memoryHours: 1.5, commitHours: 2,
@@ -84,7 +84,7 @@ export const AI_PRESETS: Record<Difficulty, AIPreset> = {
     raidGroups: 1, raidStartHours: 3, raidCooldown: 4, raidMinUnits: 2,
     sabotage: true, sabotageStartHours: 6, sabotageCooldown: 10, sabotageMaxEta: 14,
     fireMissions: true, airSorties: true, repairBridges: true, guardBridges: false, counters: false, engineers: 2,
-    reserveBarrels: 140, richBarrels: 450, unitCap: 70, produceCycle: 1.0, incomeBonus: 1,
+    reserveBarrels: 140, richBarrels: 450, unitCap: 135, produceCycle: 1.0, incomeBonus: 1,
   },
   schwer: {
     thinkHours: 0.25, maxOrders: 24, skipChance: 0, visionKm: 12, seeAll: true, seeTankers: true, memoryHours: 3, commitHours: 2,
@@ -93,7 +93,7 @@ export const AI_PRESETS: Record<Difficulty, AIPreset> = {
     raidGroups: 2, raidStartHours: 1.5, raidCooldown: 2.5, raidMinUnits: 3,
     sabotage: true, sabotageStartHours: 2, sabotageCooldown: 6, sabotageMaxEta: 22,
     fireMissions: true, airSorties: true, repairBridges: true, guardBridges: true, counters: true, engineers: 3,
-    reserveBarrels: 100, richBarrels: 320, unitCap: 100, produceCycle: 0.5, incomeBonus: 1.15,
+    reserveBarrels: 100, richBarrels: 320, unitCap: 170, produceCycle: 0.5, incomeBonus: 1.15,
   },
 };
 
