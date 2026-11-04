@@ -49,3 +49,11 @@ export const SCENARIO_NATIONS: ScenarioNation[] = [
 /** Bündnislage zu Spielbeginn: Valdoria und Marenia verbündet, Kronland feindlich (Krieg bei Spielstart) */
 export const SCENARIO_ALLIANCES: Array<[string, string]> = [['VAL', 'MAR']];
 export const SCENARIO_WARS: Array<[string, string]> = [['KRN', 'VAL'], ['KRN', 'MAR']];
+
+/**
+ * Wirtschaft (ab Phase 5, Vorbild: Öl ist die einzige Währung): Ölfelder fördern, Tankwagen-Konvois liefern über das
+ * Straßennetz an die Raffinerie, angelieferte Fässer sind das Guthaben für Produktion und Nachschub.
+ * Siehe src/logistics/types.ts.
+ */
+export const OIL_START_BARRELS = 600;
+export const OIL_FIELDS_PER_MAP = 9;

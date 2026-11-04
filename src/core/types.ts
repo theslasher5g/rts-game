@@ -47,6 +47,37 @@ export interface GeoMeta {
   grid: { width: number; height: number; cellKm: number; chunkCells: number; heightOffset: number };
   countries: CountryMeta[];
   cities: CityMeta[];
+  /** Ab Phase 5: Szenario-Daten der kleinen Karte (von scripts/build-region.mjs) */
+  scenario?: ScenarioMeta;
+}
+
+export interface OilFieldMeta {
+  id: number;
+  name: string;
+  /** a3 des Landes, in dem das Feld liegt */
+  country: string;
+  /** Welt-km [x, z] */
+  pos: [number, number];
+  /** Fässer pro Spielstunde */
+  output: number;
+}
+
+export interface NationStartMeta {
+  a3: string;
+  /** Index in meta.cities */
+  capitalCity: number;
+  /** Hauptquartier, Raffinerie und Startaufstellung (Welt-km) */
+  hq: [number, number];
+  refinery: [number, number];
+  spawn: [number, number];
+}
+
+export interface ScenarioMeta {
+  id: string;
+  name: string;
+  seed: number;
+  nations: NationStartMeta[];
+  oilFields: OilFieldMeta[];
 }
 
 /** Wasser-Flags (Grün-Kanal in countries.png) */
@@ -148,4 +179,16 @@ export interface GameEvents {
   'city:captured': { cityId: number; by: string; from: string };
   'city:unrest': { cityId: number; level: number };
   'city:uprising': { cityId: number; against: string };
+  // Phase 5 – Öl, Nachschub, Produktion
+  'oil:delivered': { owner: string; barrels: number; fieldId: number };
+  'oil:field-captured': { fieldId: number; by: string; from: string };
+  'oil:field-damaged': { fieldId: number; integrity: number };
+  'oil:balance': { owner: string; barrels: number; incomePerHour: number };
+  'production:started': { baseId: number; typeId: string; owner: string };
+  'production:complete': { baseId: number; typeId: string; owner: string; unitId: number };
+  'base:built': { baseId: number; kind: import('../logistics/types').BaseKind; owner: string };
+  'base:destroyed': { baseId: number; owner: string };
+  'convoy:started': { convoyId: number; owner: string; kind: 'oil' | 'supply' };
+  'convoy:lost': { convoyId: number; owner: string; cargo: number; by: string };
+  'supply:low': { unitId: number; what: 'fuel' | 'ammo' };
 }
