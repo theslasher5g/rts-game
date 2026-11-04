@@ -42,8 +42,6 @@ export interface ModelDef {
   lod?: ModelDef;
   /** Fahrzeug-Animation (Turm, Rohr, Rückstoß, Räder, Ketten, Radar) – nur Bodenfahrzeuge (aVPart-Attribut) */
   vanim?: AnimSpec;
-  /** Low-Detail-Geometrie des Fahrzeugs (≈25 % Dreiecke) für große Kameraabstände */
-  vlod?: THREE.BufferGeometry;
 }
 
 /** Animationsparameter eines Fahrzeugmodells (Einheiten: m, rad, s) */
@@ -72,6 +70,8 @@ export const K_GUN = 2;
 export const K_WHEEL = 3;
 export const K_RADAR = 4;
 export const K_TRACK = 5;
+/** reine Drehung um die Hochachse am Drehpunkt (z), ohne Turmdrehung (Radar auf Mast) */
+export const K_SPIN = 6;
 
 /** Erkennungsfarben */
 export const DARK = 0x2c2c28;

@@ -9,6 +9,7 @@
  * - Auswahlringe am Boden + Zustands-/Treibstoffbalken über ausgewählten Einheiten.
  */
 import * as THREE from 'three';
+import { bus } from '../core/EventBus';
 import type { Settings } from '../core/types';
 import { blocOf, getProfile, getRelation } from '../game/countryData';
 import type { GeoData } from '../world/GeoData';
@@ -35,7 +36,7 @@ type ModelDef = ModelDefT;
 // ---------------------------------------------------------------- Farben
 
 const CAMO: Record<string, number> = {
-  DEU: 0x4c5536, FRA: 0x5a5f3c, GBR: 0x55593c, POL: 0x4f5a37, RUS: 0x4b5832, UKR: 0x56603f, TUR: 0x5c5a3e,
+  VAL: 0x4f5c4a, KRN: 0x6a6040, MAR: 0x8a7a55, DEU: 0x4c5536, FRA: 0x5a5f3c, GBR: 0x55593c, POL: 0x4f5a37, RUS: 0x4b5832, UKR: 0x56603f, TUR: 0x5c5a3e,
   ITA: 0x6a6243, ESP: 0x6b6447, NLD: 0x4a5238, SWE: 0x4e5a45, NOR: 0x4d5543, FIN: 0x58604c, ROU: 0x5a5c3b,
   GRC: 0x5d5c3e, BLR: 0x4f5a36, HUN: 0x55583a,
 };
@@ -432,6 +433,274 @@ void main() {
 }
 `;
 
+// ---------------------------------------------------------------- Anim-Material (Soldaten / Luft / See)
+
+/** Nationen-ID für Tarnmuster (Soldaten-Material): 1 VAL alpin, 2 KRN khaki/braun, 3 MAR sand/oliv, 4 Wüste, 5 Wald (Rückfall) */
+const NATION_ID: Record<string, number> = { VAL: 1, KRN: 2, MAR: 3 };
+/** Kameraabstand (km), ab dem Soldaten in der Low-Detail-Variante gezeichnet werden */
+const SOLDIER_LOD_KM = 6;
+
+const ANIM_COMMON = /* glsl */ `
+vec3 S(float r, float g, float b) { return pow(vec3(r, g, b) / 255.0, vec3(2.2)) * 1.6; }
+`;
+const ANIM_VERT_DECL = /* glsl */ `
+attribute float aPaint;
+attribute vec3 aTeam;
+attribute float aPart;
+attribute vec3 aPivot;
+attribute vec4 iAnim;
+uniform float uTime;
+varying vec3 vObj;
+varying vec3 vBase;
+varying vec4 vInfo;
+${ANIM_COMMON}
+vec3 rotX(vec3 p, vec3 c, float a) { float s = sin(a), k = cos(a); vec3 d = p - c; return c + vec3(d.x, d.y * k - d.z * s, d.y * s + d.z * k); }
+vec3 rotY(vec3 p, vec3 c, float a) { float s = sin(a), k = cos(a); vec3 d = p - c; return c + vec3(d.x * k + d.z * s, d.y, -d.x * s + d.z * k); }
+vec3 rotZ(vec3 p, vec3 c, float a) { float s = sin(a), k = cos(a); vec3 d = p - c; return c + vec3(d.x * k - d.y * s, d.x * s + d.y * k, d.z); }
+vec3 skinTone(float h) {
+  float t = fract(h * 7.31);
+  return mix(pow(vec3(238.0, 196.0, 164.0) / 255.0, vec3(2.2)), pow(vec3(112.0, 76.0, 52.0) / 255.0, vec3(2.2)), t * t) * 1.15;
+}
+vec3 gearTone(float nat, float h) {
+  float v = 0.85 + 0.3 * fract(h * 3.7);
+  if (nat < 1.5) return S(54.0, 60.0, 56.0) * v;
+  if (nat < 2.5) return S(104.0, 86.0, 58.0) * v;
+  if (nat < 3.5) return S(150.0, 126.0, 86.0) * v;
+  if (nat < 4.5) return S(138.0, 118.0, 84.0) * v;
+  return S(78.0, 80.0, 62.0) * v;
+}
+`;
+const ANIM_VERT_COLOR = /* glsl */ `
+#include <color_vertex>
+{
+  float nat = floor(iAnim.w + 0.001);
+  float hs = iAnim.w - nat;
+  vec3 c0 = color.rgb;
+  vInfo = vec4(nat, hs, 0.0, 0.0);
+  vBase = instanceColor.rgb;
+  if (aPaint < 0.5) vColor.rgb = c0;
+  else if (aPaint < 1.5) {
+    if (nat > 0.5) { vColor.rgb = c0; vInfo.z = 1.0; } else vColor.rgb = c0 * instanceColor.rgb;
+  } else if (aPaint < 2.5) vColor.rgb = c0 * aTeam;
+  else if (aPaint < 3.5) vColor.rgb = c0 * skinTone(hs);
+  else vColor.rgb = c0 * gearTone(nat, hs);
+}
+`;
+const ANIM_VERT_BODY = /* glsl */ `
+#include <begin_vertex>
+{
+  vObj = position;
+  float part = aPart;
+  float natI = floor(iAnim.w + 0.001);
+  float hs = iAnim.w - natI;
+  vec3 pv = aPivot;
+  vec4 a = iAnim;
+  float glow = 0.0;
+  vec3 p = transformed;
+  if (natI > 0.5) {
+    // ---- Soldat: a.x = Schrittphase, a.y = Tempo (0..1: Gehen bis 0.5, Rennen bis 1), a.z = Anschlag 0..1
+    float ph = a.x;
+    float amp = clamp(a.y * 2.0, 0.0, 1.0);
+    float run = clamp(a.y * 2.0 - 1.0, 0.0, 1.0);
+    float aim = a.z;
+    float idle = sin(uTime * 1.5 + hs * 40.0);
+    if (part > 0.5 && part < 2.5) {
+      float phi = ph + (pv.x >= 0.0 ? 0.0 : 3.14159);
+      float th = sin(phi) * mix(0.45, 0.8, run) * amp;
+      if (part < 1.5) p = rotX(p, vec3(pv.x, 0.93, pv.z), th);
+      else {
+        float kn = -max(0.0, cos(phi)) * mix(0.7, 1.2, run) * amp;
+        p = rotX(p, pv, kn);
+        p = rotX(p, vec3(pv.x, 0.93, pv.z), th);
+      }
+    } else if (part > 2.5) {
+      if (part > 3.5 && part < 4.5) {
+        float pitch = mix(-0.15 * amp + sin(ph * 2.0) * 0.05 * amp, 0.34, aim);
+        p = rotX(p, vec3(0.0, 1.42, 0.0), pitch);
+        p = rotY(p, vec3(0.0, 1.42, 0.0), sin(ph) * 0.12 * amp * (1.0 - aim * 0.7));
+        p.y += 0.05 * aim;
+      } else if (part > 4.5 && part < 5.5) {
+        p = rotX(p, pv, sin(ph * 2.0 + 1.0) * 0.18 * amp + idle * 0.015);
+      } else if (part > 5.5) {
+        float k = part < 6.5 ? fract(hs * 3.17) : fract(hs * 5.31);
+        if (k < 0.5) p = pv;
+      }
+      float lean = (0.05 + 0.13 * run) * amp + aim * 0.1;
+      p = rotX(p, vec3(0.0, 0.95, 0.0), -lean);
+      p = rotY(p, vec3(0.0, 0.95, 0.0), sin(ph) * 0.09 * amp);
+      p.y += abs(sin(ph)) * 0.03 * amp * (1.0 + run) + idle * 0.004 * (1.0 - amp);
+    }
+    p *= mix(0.95, 1.05, hs);
+  } else if (part > 0.5) {
+    float g = a.z;
+    if (part < 10.5) {
+      // Hauptfahrwerk: nach innen einklappen
+      float side = pv.x >= 0.0 ? 1.0 : -1.0;
+      p = rotZ(p, pv, -side * g * 1.45);
+      p = pv + (p - pv) * (1.0 - 0.3 * g);
+    } else if (part < 11.5) {
+      p = rotX(p, pv, -g * 1.5);
+      p = pv + (p - pv) * (1.0 - 0.3 * g);
+    } else if (part < 12.5) {
+      // Fahrwerksklappe: bei eingefahrenem Fahrwerk geschlossen (zur Seite geklappt wenn ausgefahren)
+      float side = pv.x >= 0.0 ? 1.0 : -1.0;
+      p = rotZ(p, pv, side * (1.0 - g) * 1.3);
+    } else if (part < 13.5) {
+      glow = smoothstep(0.35, 0.9, a.y);
+      float fl = glow * (0.85 + 0.15 * sin(uTime * 45.0 + hs * 10.0));
+      p = pv + (p - pv) * vec3(1.0, 1.0, fl);
+    } else if (part < 14.5) {
+      glow = step(0.78, fract(uTime * 0.85 + hs));
+    } else if (part < 15.5) {
+      float on = step(0.05, a.y);
+      p = rotZ(p, pv, (uTime * 55.0) * on + hs * 6.0);
+    } else if (part < 16.5) {
+      p = rotY(p, pv, a.z);
+    } else if (part < 18.5) {
+      glow = 0.8;
+    } else if (part > 39.5) {
+      if (part < 40.5) p = rotY(p, pv, uTime * 2.2 + hs * 6.28);
+      else if (part < 41.5) p = rotY(p, pv, a.z);
+      else if (part < 42.5) p = rotY(p, pv, a.z * 0.85);
+      else if (part < 43.5) p = rotZ(p, pv, uTime * (1.0 + a.y * 12.0));
+      else if (part < 44.5) p = rotY(p, pv, -uTime * 1.3 + hs * 6.28);
+      else glow = 0.8;
+    }
+  }
+  vInfo.w = glow;
+  transformed = p;
+}
+`;
+const ANIM_FRAG_DECL = /* glsl */ `
+varying vec3 vObj;
+varying vec3 vBase;
+varying vec4 vInfo;
+${ANIM_COMMON}
+float h31(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float vn(vec3 x) {
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h31(i), h31(i + vec3(1, 0, 0)), f.x), mix(h31(i + vec3(0, 1, 0)), h31(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(h31(i + vec3(0, 0, 1)), h31(i + vec3(1, 0, 1)), f.x), mix(h31(i + vec3(0, 1, 1)), h31(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+vec3 camoTint(vec3 p, float nat, vec3 base) {
+  float n = vn(p * 9.0) * 0.65 + vn(p * 19.0 + 4.0) * 0.35;
+  if (nat < 1.5) {
+    // Valdoria: alpines Grüngrau mit dunklen und hellgrauen Flecken
+    return n < 0.4 ? S(50.0, 60.0, 52.0) : (n > 0.62 ? S(134.0, 142.0, 128.0) : S(88.0, 100.0, 82.0));
+  } else if (nat < 2.5) {
+    // Kronland: Khaki mit braunen Streifen
+    float s = sin(p.y * 12.0 + p.x * 6.0 + n * 7.0);
+    return s > 0.5 ? S(104.0, 78.0, 50.0) : (n < 0.3 ? S(72.0, 68.0, 46.0) : S(140.0, 124.0, 88.0));
+  } else if (nat < 4.5) {
+    // Marenia / Wüste: Sand mit Oliv und Braun
+    return n < 0.37 ? S(104.0, 110.0, 68.0) : (n > 0.66 ? S(130.0, 98.0, 64.0) : S(174.0, 154.0, 108.0));
+  }
+  return base * (n < 0.36 ? vec3(0.62, 0.68, 0.56) : (n > 0.66 ? vec3(1.05, 0.86, 0.66) : vec3(1.0)));
+}
+`;
+
+// ---------------------------------------------------------------- Fahrzeug-Material (Bodenfahrzeuge)
+
+/** Kameraabstand (km), ab dem Fahrzeuge in der Low-Detail-Variante gezeichnet werden */
+const VEH_LOD_KM = 12;
+/** Ab diesem Kameraabstand (km) werden Fahrzeug-Animationen nicht mehr fortgeschrieben */
+const VEH_ANIM_KM = 25;
+
+const VEH_VERT_DECL = /* glsl */ `
+attribute float aPaint;
+attribute vec3 aTeam;
+attribute vec4 aVPart;
+attribute vec4 aVA;
+attribute vec4 aVB;
+attribute vec3 aCol1;
+attribute vec3 aCol2;
+varying float vTrk;
+varying float vTrkOn;
+vec3 vRotX(vec3 p, vec2 c, float a) { float s = sin(a), k = cos(a); float dy = p.y - c.x, dz = p.z - c.y; return vec3(p.x, c.x + dy * k - dz * s, c.y + dy * s + dz * k); }
+vec3 vYaw(vec3 p, float tz, float a) { float s = sin(a), k = cos(a); float dx = p.x, dz = p.z - tz; return vec3(dx * k - dz * s, p.y, tz + dx * s + dz * k); }
+vec3 vSpin(vec3 p, float cz, float a) { float s = sin(a), k = cos(a); float dx = p.x, dz = p.z - cz; return vec3(dx * k + dz * s, p.y, cz - dx * s + dz * k); }
+`;
+const VEH_VERT_COLOR = /* glsl */ `
+#include <color_vertex>
+{
+  vec3 c0 = aVB.z < 0.5 ? color.rgb : (aVB.z < 1.5 ? aCol1 : aCol2);
+  if (aPaint < 0.5) vColor.rgb = c0;
+  else if (aPaint < 1.5) vColor.rgb = c0 * instanceColor.rgb;
+  else vColor.rgb = c0 * aTeam;
+  // Staub/Dreck an der unteren Wanne (je Instanz)
+  float dirt = aVB.y * (1.0 - smoothstep(0.15, 1.5, position.y));
+  vColor.rgb = mix(vColor.rgb, vColor.rgb * vec3(0.55, 0.47, 0.37) + vec3(0.02, 0.015, 0.01), dirt * 0.8);
+}
+`;
+const VEH_VERT_BODY = /* glsl */ `
+#include <begin_vertex>
+{
+  vTrk = 0.0;
+  vTrkOn = 0.0;
+  float kd = aVPart.x;
+  if (kd > 0.5) {
+    vec3 p = transformed;
+    if (kd < 1.5) p = vYaw(p, aVPart.w, aVA.x);
+    else if (kd < 2.5) { p.z += aVA.z; p = vRotX(p, aVPart.yz, aVA.y); p = vYaw(p, aVPart.w, aVA.x); }
+    else if (kd < 3.5) p = vRotX(p, aVPart.yz, -aVA.w / aVPart.w);
+    else if (kd < 4.5) { p = vSpin(p, aVPart.z, aVB.x); p = vYaw(p, aVPart.w, aVA.x); }
+    else if (kd < 5.5) { vTrkOn = 1.0; vTrk = (p.y > aVPart.y ? p.z : -p.z) + aVA.w; }
+    else p = vSpin(p, aVPart.z, aVB.x);
+    transformed = p;
+  }
+}
+`;
+const VEH_FRAG_DECL = /* glsl */ `
+varying float vTrk;
+varying float vTrkOn;
+`;
+const VEH_FRAG_COLOR = /* glsl */ `
+#include <color_fragment>
+if (vTrkOn > 0.5) {
+  float tu = vTrk * 3.2;
+  float aa = 1.0 - smoothstep(0.2, 0.55, fwidth(tu));
+  diffuseColor.rgb *= mix(0.8, fract(tu) < 0.3 ? 0.5 : 1.0, aa);
+}
+`;
+
+function createVehicleMaterial(): THREE.MeshLambertMaterial {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${VEH_VERT_DECL}`)
+      .replace('#include <color_vertex>', VEH_VERT_COLOR)
+      .replace('#include <begin_vertex>', VEH_VERT_BODY);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${VEH_FRAG_DECL}`)
+      .replace('#include <color_fragment>', VEH_FRAG_COLOR);
+  };
+  m.customProgramCacheKey = () => 'unit-veh-v1';
+  return m;
+}
+
+/** Waffen, deren Abschuss einen Rohrrücklauf auslöst */
+const RECOIL_WEAPONS = new Set(['tank_gun', 'howitzer', 'autocannon', 'flak', 'mortar']);
+
+/** Animationszustand eines Fahrzeugverbands (Turm, Rohr, Rückstoß, Laufwerk) */
+interface VehVis {
+  tYaw: number;
+  elev: number;
+  odo: number;
+  odoT: number;
+  lx: number;
+  lz: number;
+  mv: number;
+  bobY: number;
+  wobP: number;
+  wobR: number;
+  nm: number;
+  fireIdx: number;
+  /** Sekunden seit dem letzten Schuss je Mitglied */
+  rec: Float32Array;
+  init: boolean;
+}
+
 // ---------------------------------------------------------------- Renderer
 
 interface ModelSlot {
@@ -442,6 +711,11 @@ interface ModelSlot {
   count: number;
   /** benötigte Kapazität (Vorlauf) */
   need: number;
+  /** Anim-Attribut iAnim (vec4 je Instanz) – nur bei animierten Modellen */
+  anim: THREE.InstancedBufferAttribute | null;
+  /** Fahrzeug-Animation: aVA (Turm, Rohr, Rückstoß, Strecke) und aVB (Radar, Dreck, Tarnvariante) */
+  va: THREE.InstancedBufferAttribute | null;
+  vb: THREE.InstancedBufferAttribute | null;
 }
 
 interface UnitVis {
@@ -454,6 +728,14 @@ interface UnitVis {
   seen: number;
   /** Phase 3: weiche Haltung der Infanterie 0 = stehen, 1 = kauern, 2 = liegen */
   post: number;
+  /** Fahrzeug-Animationszustand (nur Bodenfahrzeuge mit def.vanim) */
+  veh?: VehVis;
+  /** Animationszustand (Soldaten: Schrittphase, Tempo, Anschlag; Luft/See: Fahrwerk, Geschützdrehung) */
+  walk: number;
+  mv: number;
+  aim: number;
+  gear: number;
+  slew: number;
 }
 
 const _m = new THREE.Matrix4();
@@ -484,6 +766,15 @@ export class UnitRenderer {
   private readonly slots = new Map<string, ModelSlot>();
   private readonly rotorSlot: ModelSlot;
   private readonly material: THREE.MeshLambertMaterial;
+  /** Material für animierte Modelle (Soldaten, Luftfahrzeuge, Schiffe): Part-Animation im Vertex-Shader */
+  private readonly animMaterial: THREE.MeshLambertMaterial;
+  /** Material der animierten Bodenfahrzeuge (Turm/Rohr/Räder/Ketten per Vertex-Shader, Tarnvarianten, Dreck) */
+  private readonly vehMaterial: THREE.MeshLambertMaterial = createVehicleMaterial();
+  private lowLodVeh = false;
+  private readonly animTime = { value: 0 };
+  /** Schlüssel -> Low-Detail-Slot-Schlüssel */
+  private readonly loKeys = new Map<string, string>();
+  private lowLod = false;
   private readonly vis = new Map<number, UnitVis>();
   private readonly ownerColors = new Map<string, OwnerColors>();
   private readonly affilCache = new Map<string, number>();
@@ -547,11 +838,38 @@ export class UnitRenderer {
     };
     this.material.customProgramCacheKey = () => 'unit-paint-v1';
 
+    this.animMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    this.animMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.animTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${ANIM_VERT_DECL}`)
+        .replace('#include <color_vertex>', ANIM_VERT_COLOR)
+        .replace('#include <begin_vertex>', ANIM_VERT_BODY);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${ANIM_FRAG_DECL}`)
+        .replace('#include <color_fragment>', `#include <color_fragment>\n  if (vInfo.z > 0.5) diffuseColor.rgb *= camoTint(vObj, vInfo.x, vBase);`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * vInfo.w * 2.2;`);
+    };
+    this.animMaterial.customProgramCacheKey = () => 'unit-anim-v1';
+    // Rohrrücklauf: Schuss-Ereignis -> nächstes Mitglied des Verbands zuckt zurück
+    bus.on('combat:fire', (e) => {
+      if (!RECOIL_WEAPONS.has(e.weapon)) return;
+      const vv = this.vis.get(e.unitId)?.veh;
+      if (vv) vv.rec[vv.fireIdx++ % vv.nm] = 0;
+    });
+
     this.models = buildModels();
     for (const key of Object.keys(this.models)) {
       const slot = this.makeSlot(this.models[key], 16);
       this.slots.set(key, slot);
       group.add(slot.mesh);
+      const lod = this.models[key].lod;
+      if (lod) {
+        const lo = this.makeSlot(lod, 16);
+        this.slots.set(`${key}#lo`, lo);
+        this.loKeys.set(key, `${key}#lo`);
+        group.add(lo.mesh);
+      }
     }
     this.rotorSlot = this.makeSlot({ geom: rotorGeometry(), size: 1, boost: 1, livery: 'air', tilt: false }, 16);
     group.add(this.rotorSlot.mesh);
@@ -654,6 +972,9 @@ export class UnitRenderer {
     const gy = Math.max(0, this.geo.heightAt(_cam.x, _cam.z)) * this.exag;
     const dist = _dir.y < -0.05 ? Math.max(0.5, (_cam.y - gy * 0.5) / -_dir.y) : Math.max(0.5, _cam.y);
     this.camDist = dist;
+    this.lowLod = dist > SOLDIER_LOD_KM * (this.lowLod ? 0.9 : 1.1);
+    this.lowLodVeh = dist > VEH_LOD_KM * (this.lowLodVeh ? 0.9 : 1.1);
+    this.animTime.value = timeSec % 1024;
     const thr = COUNTER_DISTANCE * (this.counterMode ? 1 - COUNTER_HYST : 1 + COUNTER_HYST);
     this.counterMode = dist > thr;
     const s = clamp(VIS_SCALE_K * dist, VIS_SCALE_MIN, VIS_SCALE_MAX);
@@ -680,7 +1001,7 @@ export class UnitRenderer {
     if (!this.counterMode) {
       for (let i = 0; i < n; i++) {
         const u = units[i];
-        const slot = this.slots.get(this.keyOf(u));
+        const slot = this.slots.get(this.slotKey(u));
         if (!slot) continue;
         slot.need += u.type.memberCount;
         if (slot.def.rotors) this.rotorSlot.need += u.type.memberCount * slot.def.rotors.length;
@@ -792,6 +1113,14 @@ export class UnitRenderer {
     return k;
   }
 
+  /** Slot-Schlüssel inkl. Low-Detail-Variante (ab SOLDIER_LOD_KM Kameraabstand) */
+  private slotKey(u: Unit): string {
+    const k = this.keyOf(u);
+    const lk = this.loKeys.get(k);
+    if (lk === undefined) return k;
+    return (this.models[k].vanim ? this.lowLodVeh : this.lowLod) ? lk : k;
+  }
+
   private unitRadius(def: ModelDef, members: number): number {
     const sp = this.memberSpacing(def);
     return this.visScale * 0.001 * (def.size * def.boost * 0.6 + sp * Math.sqrt(members) * 0.9);
@@ -805,13 +1134,13 @@ export class UnitRenderer {
   private drawUnit(u: Unit, def: ModelDef, uy: number, s: number, dt: number, smooth: number, time: number): void {
     // Phase 3: besetzte Gebäude -> unsichtbar
     if (u.garrisonId) return;
-    const slot = this.slots.get(this.keyOf(u))!;
+    const slot = this.slots.get(this.slotKey(u))!;
     // Phase 3: gefallene Soldaten nicht zeichnen (membersAlive, falls vom CombatSystem gesetzt)
     const nAll = Math.min(u.type.memberCount, 32);
     const n = Math.max(0, Math.min(nAll, Math.ceil(u.membersAlive ?? nAll)));
     let v = this.vis.get(u.id);
     if (!v) {
-      v = { off: new Float32Array(nAll * 2), init: false, pitch: 0, roll: 0, lastHeading: u.heading, seen: 0, post: 0 };
+      v = { off: new Float32Array(nAll * 2), init: false, pitch: 0, roll: 0, lastHeading: u.heading, seen: 0, post: 0, walk: 0, mv: 0, aim: 0, gear: 0, slew: 0 };
       this.vis.set(u.id, v);
     }
     v.seen = this.frameNo;
@@ -919,6 +1248,46 @@ export class UnitRenderer {
     // In Deckung (stehend) schauen die Soldaten zur Bedrohung (= Schutzrichtung der Deckung)
     const coverYaw = coverLine && !moving ? Math.atan2(cdx, -cdz) : NaN;
     const airborne = !!u.airborne;
+    // --- Fahrzeug-Animation (Turm/Rohr/Rückstoß/Laufwerk, siehe vehPrep)
+    const vv = slot.va && def.vanim ? this.vehPrep(u, v, def, dt, ws * def.boost, nAll, time) : null;
+    const wobP = vv ? vv.wobP : 0, wobR = vv ? vv.wobR : 0, bobY = vv ? vv.bobY * ws * def.boost : 0;
+    // --- Animationszustand für das Anim-Material (Soldaten: Gehen/Anschlag; Luft/See: Fahrwerk, Geschützdrehung)
+    const an = slot.anim ? (slot.anim.array as Float32Array) : null;
+    const animSoldier = def.anim === 'soldier';
+    const nat = animSoldier ? NATION_ID[u.owner] ?? (DESERT.has(u.owner) ? 4 : 5) : 0;
+    let aThrust = 0, aZ = 0;
+    if (an) {
+      if (animSoldier) {
+        const spd = moving && !u.pinned ? u.speedKmh : 0;
+        const tMv = spd > 0.3 ? Math.min(1, 0.1 + spd * 0.09) : 0;
+        v.mv += (tMv - v.mv) * smooth;
+        const rate = 5.5 + 4 * Math.max(0, v.mv * 2 - 1);
+        v.walk = (v.walk + dt * rate * clamp(v.mv * 4, 0, 1)) % 628.3185;
+        const aimT = u.engaged || (u.targetId ?? 0) > 0 ? 1 : 0;
+        v.aim += (aimT - v.aim) * (1 - Math.exp(-dt * 7));
+        aThrust = v.mv;
+        aZ = v.aim;
+      } else {
+        const maxSp = u.type.mobility.offroadSpeed || 1;
+        aThrust = airborne || domain === 'naval' ? clamp(0.35 + (0.65 * u.speedKmh) / maxSp, 0, 1) : 0;
+        if (cat === 'jet') {
+          const alt = u.y - Math.max(0, this.geo.heightAt(u.x, u.z)) * this.exag;
+          const gt = airborne && alt > 0.05 ? 1 : 0;
+          v.gear += (gt - v.gear) * (1 - Math.exp(-dt * 0.9));
+          aZ = v.gear;
+        } else {
+          // Chin-Turm / Bordgeschütz dreht zum Ziel (relativ zum Bug)
+          let want = 0;
+          const tgt = u.targetId ? this.manager.get(u.targetId) : undefined;
+          if (tgt) {
+            want = -wrap(Math.atan2(tgt.x - u.x, -(tgt.z - u.z)) - u.heading);
+            if (domain === 'air') want = clamp(want, -1.4, 1.4);
+          }
+          v.slew += clamp(wrap(want - v.slew), -dt * 2.2, dt * 2.2);
+          aZ = v.slew;
+        }
+      }
+    }
     for (let i = 0; i < n; i++) {
       if (slot.count >= slot.cap) break;
       const ox = off[i * 2] * ws, oz = off[i * 2 + 1] * ws;
@@ -929,14 +1298,14 @@ export class UnitRenderer {
       if (isGround) wy = Math.max(0, this.geo.heightAt(wx, wz)) * this.exag;
       const yawJ = !moving && isGround ? jit(u.id, i, 5) * (cat === 'infantry' ? 1.2 : 0.25) : 0;
       const yawBase = coverYaw === coverYaw ? coverYaw : h;
-      _e.set(v.pitch, -yawBase + yawJ, v.roll);
+      _e.set(v.pitch + wobP, -yawBase + yawJ, v.roll + wobR);
       _q.setFromEuler(_e);
       if (lean > 0.001) {
         // Haltung: Kippung um die lokale X-Achse (nach dem Gieren)
         _q2.setFromAxisAngle(_xAxis, -lean);
         _q.multiply(_q2);
       }
-      _p.set(wx, wy + hop, wz);
+      _p.set(wx, wy + hop + bobY, wz);
       if (pz > 0.001) _s.set(scale, scale * sy, scale * sz);
       else _s.setScalar(scale);
       _m.compose(_p, _q, _s);
@@ -948,6 +1317,14 @@ export class UnitRenderer {
       tc[k * 3] = col.team.r;
       tc[k * 3 + 1] = col.team.g;
       tc[k * 3 + 2] = col.team.b;
+      if (an) {
+        const hs = (jit(u.id, i, 9) + 0.5) * 0.99;
+        an[k * 4] = animSoldier ? v.walk + (jit(u.id, i, 7) + 0.5) * 6.2832 : 0;
+        an[k * 4 + 1] = aThrust;
+        an[k * 4 + 2] = aZ;
+        an[k * 4 + 3] = nat + hs;
+      }
+      if (vv) this.vehWrite(slot, k, vv, def, u.id, i, time);
       slot.count++;
 
       if (def.rotors) {
@@ -972,6 +1349,112 @@ export class UnitRenderer {
     }
   }
 
+  /** Fahrzeug-Animationszustand fortschreiben: Strecke (Räder/Ketten), Turm/Rohr zum Ziel, Rückstoßzeiten, Federung */
+  private vehPrep(u: Unit, v: UnitVis, def: ModelDef, dt: number, kmPerM: number, nm: number, _time: number): VehVis {
+    const sp = def.vanim!;
+    let w = v.veh;
+    if (!w) {
+      w = v.veh = {
+        tYaw: 0, elev: sp.elevRest, odo: 0, odoT: 0, lx: u.x, lz: u.z, mv: 0, bobY: 0, wobP: 0, wobR: 0,
+        nm: Math.max(1, nm), fireIdx: 0, rec: new Float32Array(Math.max(1, nm)).fill(9), init: true,
+      };
+    }
+    // Strecke (Modellmeter, vorzeichenbehaftet) – auch aus der Ferne fortschreiben, damit nichts springt
+    const dx = u.x - w.lx, dz = u.z - w.lz;
+    w.lx = u.x;
+    w.lz = u.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.5 && d > 1e-7) w.odoT += ((dx * Math.sin(u.heading) - dz * Math.cos(u.heading) >= 0 ? 1 : -1) * d) / kmPerM;
+    if (this.camDist > VEH_ANIM_KM) {
+      w.odo = w.odoT;
+      w.wobP = w.wobR = w.bobY = 0;
+      return w;
+    }
+    w.odo += (w.odoT - w.odo) * (1 - Math.exp(-dt * 12));
+    const moving = u.speedKmh > 0.5 ? 1 : 0;
+    w.mv += (moving - w.mv) * (1 - Math.exp(-dt * 3));
+    const ph = w.odo * 1.3;
+    w.bobY = sp.bob * w.mv * (Math.sin(ph * 2.1) + 0.6 * Math.sin(ph * 3.7));
+    w.wobP = 0.012 * w.mv * Math.sin(ph * 1.7);
+    w.wobR = 0.01 * w.mv * Math.sin(ph * 2.3 + 1);
+    // Ziel bestimmen
+    let hasT = false, tx = 0, tz = 0;
+    if (sp.turretRate > 0 || sp.elevMode !== 'none') {
+      if (u.targetId) {
+        const t = this.manager.get(u.targetId);
+        if (t && t.hp > 0) {
+          tx = t.x;
+          tz = t.z;
+          hasT = true;
+        }
+      }
+      if (!hasT && u.fireX !== undefined && u.fireZ !== undefined) {
+        tx = u.fireX;
+        tz = u.fireZ;
+        hasT = true;
+      }
+    }
+    const engaged = !!u.engaged;
+    const dKm = hasT ? Math.hypot(tx - u.x, tz - u.z) : 0;
+    if (sp.turretRate > 0) {
+      const want = hasT ? wrap(Math.atan2(tx - u.x, -(tz - u.z)) - u.heading) : 0;
+      const step = sp.turretRate * dt;
+      w.tYaw = wrap(w.tYaw + clamp(wrap(want - w.tYaw), -step, step));
+    }
+    // Rohrerhöhung
+    let wantEl = sp.elevRest;
+    const rng = Math.max(0.5, u.type.rangeKm);
+    switch (sp.elevMode) {
+      case 'direct':
+        if (hasT) wantEl = sp.elevRest + Math.min(0.08, dKm * 0.015);
+        break;
+      case 'indirect':
+        if (hasT) wantEl = 0.3 + 0.8 * clamp(dKm / rng, 0, 1);
+        break;
+      case 'launcher':
+        if (hasT || engaged) wantEl = sp.elevMax * (0.65 + 0.35 * clamp(dKm / rng, 0, 1));
+        break;
+      case 'sam':
+        if (hasT || engaged) wantEl = sp.elevMax;
+        break;
+      case 'aa':
+        if (hasT) wantEl = 0.45 + 0.5 * clamp(1 - dKm / rng, 0, 1);
+        else if (engaged) wantEl = 0.7;
+        break;
+      default:
+        break;
+    }
+    wantEl = clamp(wantEl, sp.elevRest, sp.elevMax);
+    if (sp.elevMode !== 'none') {
+      const es = sp.elevRate * dt;
+      w.elev += clamp(wantEl - w.elev, -es, es);
+    }
+    for (let i = 0; i < w.nm; i++) if (w.rec[i] < 9) w.rec[i] += dt;
+    return w;
+  }
+
+  /** Instanzdaten eines Fahrzeugs (aVA/aVB) schreiben */
+  private vehWrite(slot: ModelSlot, k: number, w: VehVis, def: ModelDef, id: number, i: number, time: number): void {
+    const sp = def.vanim!;
+    const va = slot.va!.array as Float32Array;
+    const vb = slot.vb!.array as Float32Array;
+    const t = w.rec[i % w.nm];
+    let rc = 0;
+    if (t < 0.35) {
+      const x = t / 0.35;
+      rc = x < 0.12 ? x / 0.12 : Math.pow(1 - (x - 0.12) / 0.88, 2);
+    }
+    const o = k * 4;
+    va[o] = w.tYaw;
+    va[o + 1] = w.elev;
+    va[o + 2] = rc * sp.recoil;
+    va[o + 3] = w.odo;
+    vb[o] = (time * sp.radarRate + id * 0.7 + i * 1.9) % 6.2831853;
+    vb[o + 1] = 0.25 + 0.7 * (jit(id, i, 12) + 0.5);
+    vb[o + 2] = Math.min(2, Math.floor((jit(id, i, 11) + 0.5) * 3));
+    vb[o + 3] = 0;
+  }
+
   private finishSlot(slot: ModelSlot): void {
     slot.mesh.count = slot.count;
     slot.mesh.visible = slot.count > 0;
@@ -986,6 +1469,18 @@ export class UnitRenderer {
       slot.team.clearUpdateRanges();
       slot.team.addUpdateRange(0, slot.count * 3);
       slot.team.needsUpdate = true;
+      if (slot.va && slot.vb) {
+        for (const a of [slot.va, slot.vb]) {
+          a.clearUpdateRanges();
+          a.addUpdateRange(0, slot.count * 4);
+          a.needsUpdate = true;
+        }
+      }
+      if (slot.anim) {
+        slot.anim.clearUpdateRanges();
+        slot.anim.addUpdateRange(0, slot.count * 4);
+        slot.anim.needsUpdate = true;
+      }
     }
   }
 
@@ -1000,14 +1495,27 @@ export class UnitRenderer {
     const team = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     team.setUsage(THREE.DynamicDrawUsage);
     def.geom.setAttribute('aTeam', team);
-    const mesh = new THREE.InstancedMesh(def.geom, this.material, cap);
+    let anim: THREE.InstancedBufferAttribute | null = null;
+    if (def.anim) {
+      anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+      anim.setUsage(THREE.DynamicDrawUsage);
+      def.geom.setAttribute('iAnim', anim);
+    }
+    let va: THREE.InstancedBufferAttribute | null = null, vb: THREE.InstancedBufferAttribute | null = null;
+    if (def.vanim) {
+      va = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+      vb = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+      def.geom.setAttribute('aVA', va);
+      def.geom.setAttribute('aVB', vb);
+    }
+    const mesh = new THREE.InstancedMesh(def.geom, def.anim ? this.animMaterial : def.vanim ? this.vehMaterial : this.material, cap);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
     mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     mesh.frustumCulled = false;
     mesh.count = 0;
     mesh.visible = false;
-    return { def, mesh, team, cap, count: 0, need: 0 };
+    return { def, mesh, team, cap, count: 0, need: 0, anim, va, vb };
   }
 
   private growSlot(key: string, slot: ModelSlot): void {
@@ -1019,6 +1527,9 @@ export class UnitRenderer {
     this.object.add(fresh.mesh);
     slot.mesh = fresh.mesh;
     slot.team = fresh.team;
+    slot.anim = fresh.anim;
+    slot.va = fresh.va;
+    slot.vb = fresh.vb;
     slot.cap = cap;
   }
 

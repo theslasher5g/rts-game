@@ -3,6 +3,7 @@ import { GameRenderer } from '../src/render/GameRenderer';
 import { GeoData } from '../src/world/GeoData';
 import { UnitManager } from '../src/units/UnitManager';
 import { UnitRenderer } from '../src/units/UnitRenderer';
+import { buildModels } from '../src/units/models';
 import { DEFAULT_SETTINGS } from '../src/core/types';
 
 interface Cfg {
@@ -13,6 +14,8 @@ interface Cfg {
 }
 
 async function main() {
+  const M = buildModels();
+  console.log('TRIS ' + Object.keys(M).map((k) => `${k}=${M[k].geom.getAttribute('position').count / 3}${M[k].lod ? '/lod' + M[k].lod.geom.getAttribute('position').count / 3 : ''}`).join(' '));
   const canvas = document.getElementById('c') as HTMLCanvasElement;
   const settings = { ...DEFAULT_SETTINGS, pixelScale: 3 };
   const gfx = new GameRenderer(canvas, settings);
@@ -71,10 +74,11 @@ async function main() {
       const c = cfg!.cam;
       const tx = bx + c.dx, tz = bz + c.dz;
       const pr = (c.pitch * Math.PI) / 180, yw = (c.yaw * Math.PI) / 180;
-      cam.position.set(tx + Math.sin(yw) * Math.cos(pr) * c.dist, Math.sin(pr) * c.dist, tz + Math.cos(yw) * Math.cos(pr) * c.dist);
-      cam.lookAt(tx, 0, tz);
+      const ty = (c as { dy?: number }).dy ?? 0;
+      cam.position.set(tx + Math.sin(yw) * Math.cos(pr) * c.dist, ty + Math.sin(pr) * c.dist, tz + Math.cos(yw) * Math.cos(pr) * c.dist);
+      cam.lookAt(tx, ty, tz);
       cam.updateMatrixWorld();
-      ur.update(cam, time, 'DEU');
+      ur.update(cam, time, "DEU");
     }
     gfx.render(cam, time);
   };

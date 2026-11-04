@@ -12,8 +12,9 @@ import {
 export type { ModelDef };
 export { buildRotorGeom };
 
-const WEST = new Set(['DEU', 'NOR', 'SWE', 'ESP', 'GRC', 'POL']);
-const RUSSIAN = new Set(['RUS', 'BLR']);
+// Nordadria: Valdoria (VAL) = Leopard-Profil, Kronland (KRN) = T-90-Profil, Marenia (MAR) = Abrams-Profil
+const WEST = new Set(['DEU', 'NOR', 'SWE', 'ESP', 'GRC', 'POL', 'VAL']);
+const RUSSIAN = new Set(['RUS', 'BLR', 'KRN']);
 
 /** Unit-Typ-ID -> Soldatenvariante */
 const SOLDIER_KIND: Record<string, SoldierKind> = {
