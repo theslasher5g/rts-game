@@ -41,6 +41,28 @@ export interface HostSyncStats {
 /** Ereignisse, die nicht weitergereicht werden (Zustand kommt per Schnappschuss; oder würde Gast-Simulation doppeln) */
 const NOT_FORWARDED = new Set(['building:damaged', 'civil:casualties', 'civil:infra', 'civil:aid']);
 
+/**
+ * Kumulatives Delta gegen den letzten VOLLEN Schnappschuss: ein Delta enthält alles, was seit dem Voll-Stand anders ist. Damit sind
+ * Deltas idempotent und verlustfest (ein verworfener/ersetzter Zwischen-Schnappschuss kostet nichts); der Gast heilt spätestens
+ * mit dem nächsten Voll-Schnappschuss.
+ */
+class DeltaSet<R extends ReadonlyArray<unknown>> {
+  base = new Map<number, R>();
+  cur = new Map<number, R>();
+  add(id: number, row: R): void {
+    this.cur.set(id, row);
+  }
+  /** rows = zu sendende Zeilen, gone = seit dem Voll-Stand verschwundene IDs (nur bei Delta) */
+  finish(full: boolean): { rows: R[]; gone: number[] } {
+    const rows: R[] = [];
+    for (const [id, r] of this.cur) if (full || !sameRow(this.base.get(id), r)) rows.push(r);
+    const gone: number[] = [];
+    if (!full) for (const id of this.base.keys()) if (!this.cur.has(id)) gone.push(id);
+    if (full) { this.base = this.cur; this.cur = new Map(); } else this.cur.clear();
+    return { rows, gone };
+  }
+}
+
 export class HostSync {
   readonly stats: HostSyncStats = { sent: 0, fullSent: 0, lastBytes: 0, lastFullBytes: 0, maxBytes: 0, eventsSent: 0, eventsDropped: 0 };
   /** Letzter gebauter Schnappschuss (Debug/Test) */
@@ -66,23 +88,24 @@ export class HostSync {
   private readonly types: string[] = [];
   private readonly typeIdx = new Map<string, number>();
 
-  private readonly unitRows = new Map<number, number[]>();
-  private readonly seenTmp = new Set<number>();
-  private readonly fieldRows = new Map<number, number[]>();
-  private readonly baseRows = new Map<number, Array<number | string>>();
-  private readonly orderRows = new Map<number, Array<number | string>>();
-  private readonly convoyRows = new Map<number, number[]>();
-  private readonly structRows = new Map<number, Array<number | string>>();
-  private readonly structSent = new Set<number>();
-  private readonly cityRows = new Map<number, number[]>();
-  private readonly infraRows = new Map<number, number[]>();
-  private readonly garrisonSent = new Map<number, number>();
-  private readonly bldAll = new Map<number, number>();
-  private readonly bldDirty = new Set<number>();
+  private readonly dUnits = new DeltaSet<number[]>();
+  private readonly dFields = new DeltaSet<number[]>();
+  private readonly dBases = new DeltaSet<Array<number | string>>();
+  private readonly dOrders = new DeltaSet<Array<number | string>>();
+  private readonly dConvoys = new DeltaSet<number[]>();
+  private readonly dStructs = new DeltaSet<Array<number | string>>();
+  private readonly dCities = new DeltaSet<number[]>();
+  private readonly dInfra = new DeltaSet<number[]>();
+  private readonly dGarrison = new DeltaSet<number[]>();
+  private readonly dBld = new DeltaSet<number[]>();
+  private readonly structGeo = new Map<number, NonNullable<NetSnapshot['sn']>[number]>();
+  private readonly structBase = new Set<number>();
+  private readonly nameBase = new Set<number>();
   private readonly closedEdges = new Set<number>();
-  private edgesDirty = true;
-  private lastWars = '';
-  private lastRep = '';
+  private readonly bldAll = new Map<number, number>();
+  private baseEdges = '';
+  private baseWars = '';
+  private baseRep = '';
   private fxLeft = 0;
 
   constructor(ctx: GameContext, transport: NetTransport, opts: HostSyncOptions = {}) {
@@ -101,11 +124,9 @@ export class HostSync {
     this.offs.push(
       bus.on('nav:edge', ({ edgeId, open }) => {
         if (open) this.closedEdges.delete(edgeId); else this.closedEdges.add(edgeId);
-        this.edgesDirty = true;
       }),
       bus.on('building:damaged', ({ id, integrity }) => {
         this.bldAll.set(id, integrity);
-        this.bldDirty.add(id);
       }),
       transport.onPeersChanged(() => { this.forceFullNext = true; }),
     );
@@ -198,7 +219,8 @@ export class HostSync {
 
     // --- Krieg
     const pairs = typeof ctx.war.listPairs === 'function' ? ctx.war.listPairs().map(([a, b]) => `${a}|${b}`).sort().join(',') : '';
-    if (full || pairs !== this.lastWars) { snap.wars = pairs ? pairs.split(',') : []; this.lastWars = pairs; }
+    if (full || pairs !== this.baseWars) snap.wars = pairs ? pairs.split(',') : [];
+    if (full) this.baseWars = pairs;
 
     // --- Öl-Pools
     for (const a3 of ctx.economy.nations) {
@@ -209,7 +231,8 @@ export class HostSync {
       const rows: number[][] = [];
       for (const a3 of ctx.economy.nations) rows.push([this.own(a3), q(this.rep.value(a3), 10)]);
       const key = JSON.stringify(rows);
-      if (full || key !== this.lastRep) { snap.rep = rows; this.lastRep = key; }
+      if (full || key !== this.baseRep) snap.rep = rows;
+      if (full) this.baseRep = key;
     }
 
     this.buildUnits(snap, full);
@@ -217,7 +240,10 @@ export class HostSync {
     this.buildStructures(snap, full);
     this.buildCivil(snap, full);
 
-    if (full || this.edgesDirty) { snap.ce = Array.from(this.closedEdges).sort((a, b) => a - b); this.edgesDirty = false; }
+    const ce = Array.from(this.closedEdges).sort((a, b) => a - b);
+    const ceKey = ce.join(',');
+    if (full || ceKey !== this.baseEdges) snap.ce = ce;
+    if (full) this.baseEdges = ceKey;
     snap.ow = this.owners.slice();
     if (full) snap.tt = this.types.slice();
     return snap;
@@ -225,34 +251,27 @@ export class HostSync {
 
   private buildUnits(snap: NetSnapshot, full: boolean): void {
     const { units } = this.ctx;
-    const seen = this.seenTmp;
-    seen.clear();
     const names: Array<[number, string]> = [];
     const withNames = full && this.fullCount % 3 === 0;
     const garrison = new Map<number, number>();
+    const d = this.dUnits;
     for (const u of units.units) {
       if (u.hp <= 0) continue;
-      const row = encodeUnit(u, this.own(u.owner), this.typeOf(u.type.id));
-      seen.add(u.id);
-      const prev = this.unitRows.get(u.id);
-      if (full || !sameRow(prev, row)) snap.u.push(row);
-      if (!prev || withNames) names.push([u.id, u.name]);
-      this.unitRows.set(u.id, row);
+      d.add(u.id, encodeUnit(u, this.own(u.owner), this.typeOf(u.type.id)));
+      if (withNames || !this.nameBase.has(u.id)) names.push([u.id, u.name]);
       if (u.garrisonId !== undefined) garrison.set(u.garrisonId, (garrison.get(u.garrisonId) ?? 0) + u.type.memberCount);
     }
-    let removed: number[] | undefined;
-    for (const id of this.unitRows.keys()) {
-      if (!seen.has(id)) (removed ??= []).push(id);
-    }
-    if (removed) { for (const id of removed) this.unitRows.delete(id); snap.ud = removed; }
+    const r = d.finish(full);
+    snap.u = r.rows;
+    if (r.gone.length) snap.ud = r.gone;
+    if (full) { this.nameBase.clear(); for (const id of d.base.keys()) this.nameBase.add(id); }
+    // Delta: alle seit dem Voll-Stand neuen Einheiten (nicht in nameBase) tragen ihren Namen
     if (names.length) snap.nm = names;
-
     // Besatzungen (Gebäude)
-    const bg: number[][] = [];
-    for (const [id, n] of garrison) if (full || this.garrisonSent.get(id) !== n) bg.push([id, n]);
-    for (const [id] of this.garrisonSent) if (!garrison.has(id)) bg.push([id, 0]);
-    this.garrisonSent.clear();
-    for (const [id, n] of garrison) this.garrisonSent.set(id, n);
+    for (const [id, n] of garrison) this.dGarrison.add(id, [id, n]);
+    const g = this.dGarrison.finish(full);
+    const bg = g.rows.slice();
+    for (const id of g.gone) bg.push([id, 0]);
     if (bg.length) snap.bg = bg;
   }
 
