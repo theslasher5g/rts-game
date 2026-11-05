@@ -4,6 +4,7 @@ import type { Settings } from '../core/types';
 import type { NavGraph } from '../nav/NavGraph';
 import { SUN_COLOR, SUN_DIR, forestMask, dryMask } from './Terrain';
 import { cityRadiusKm } from './Cities';
+import { SCALE } from '../core/scale';
 
 /**
  * Prozedurale Wälder, Bäume, Büsche, Hecken – in Kacheln um die Kamera gestreamt.
@@ -21,7 +22,10 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 const GRID_N = 72;
 const BASE_SPACING = 0.055;
 const BASE_TILE = BASE_SPACING * GRID_N; // 3.96 km
-const MAX_DIST = 115;
+/** Bäume: Basishöhen (SP_HEIGHT) liegen bereits ~1.3× über real -> etwas unter SCALE.props */
+const TREE_SCALE = SCALE.props * 0.8;
+/** Ausblenden (km Kamerahöhe): darüber wären Bäume Subpixel (kein Hochskalieren) */
+const MAX_DIST = 24;
 const INSTANCE_CAP = 250000;
 const BUILD_BUDGET_MS = 6;
 const MAX_BUILDS_PER_FRAME = 3;
@@ -367,7 +371,7 @@ export class Vegetation {
       return;
     }
     this.group.visible = true;
-    this.mat.uniforms.uVis.value = THREE.MathUtils.clamp(0.5 + D * 0.3, 2, 10);
+    this.mat.uniforms.uVis.value = TREE_SCALE; // fester Maßstab (Basishöhen sind schon etwas über real)
 
     // Klasse mit Hysterese
     let kNew = 0;
@@ -483,7 +487,7 @@ export class Vegetation {
     if (this.clearingProvider) for (const c of this.clearingProvider(x0, z0, x0 + T, z0 + T)) circles.push(c);
     const segs = k <= 1 ? this.roadSegments(x0, z0, x0 + T, z0 + T) : [];
     const buf: number[][] = Array.from({ length: SP_COUNT }, () => []);
-    const sizeMul = Math.pow(1.35, k); // gröbere Raster: etwas kräftigere Bäume
+    const sizeMul = 1; // gleiche Baumgröße in jeder Klasse (kein Wachsen mit dem Abstand)
     const lat0 = (z0 + T / 2) / g.heightKm;
 
     const blocked = (x: number, z: number): boolean => {

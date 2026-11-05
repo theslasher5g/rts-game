@@ -327,6 +327,8 @@ class MarkerLayer {
 // ------------------------------------------------------------------ Hauptklasse
 
 export class CivilianSystem {
+  /** Mehrspieler (Gast): Spiegel – keine Zivil-Simulation (Verluste, Evakuierung, Hilfe); Zustand schreibt GuestSync in place, Ambient-Darstellung läuft weiter */
+  mirror = false;
   readonly cities: CivilCity[];
   readonly infra: InfraInfo[];
   readonly object = new THREE.Group();
@@ -709,27 +711,30 @@ export class CivilianSystem {
 
   private bindEvents(): void {
     bus.on('combat:fire', (e) => {
+      if (this.mirror) return;
       const u = this.units.get(e.unitId);
       if (!u) return;
       this.fire.push({ tx: e.tx, tz: e.tz, owner: u.owner, t: this.clock });
       if (this.fire.length > 400) this.fire.splice(0, 200);
     });
     bus.on('combat:impact', (e) => {
+      if (this.mirror) return;
       if (e.surface === 'water' || e.surface === 'armor' || e.surface === 'flesh') return;
       this.blast(e.x, e.z, e.radiusKm, e.surface === 'building' ? 1.4 : 1, 'impact');
     });
-    bus.on('combat:explosion', (e) => this.blast(e.x, e.z, EXPLOSION_R[e.size] ?? 0.02, 0.5, 'explosion'));
+    bus.on('combat:explosion', (e) => { if (!this.mirror) this.blast(e.x, e.z, EXPLOSION_R[e.size] ?? 0.02, 0.5, 'explosion'); });
     bus.on('building:damaged', (e) => {
+      if (this.mirror) return;
       const prev = this.bldIntegrity.get(e.id) ?? 1;
       this.bldIntegrity.set(e.id, e.integrity);
       const b = this.buildings.getBuilding(e.id);
       const c = this.bldCityOf(e.id, b.x, b.z);
       if (c) this.cx[c.id].dmgSum += Math.max(0, prev - e.integrity);
     });
-    bus.on('building:destroyed', (e) => this.onBuildingDestroyed(e.id, e.x, e.z));
-    bus.on('bridge:destroyed', (e) => this.onBridgeDestroyed(e.edgeId, e.geom));
-    bus.on('nav:edge', (e) => { if (!e.open) this.onEdgeClosed(e.edgeId); });
-    bus.on('city:captured', (e) => this.setController(e.cityId, e.by));
+    bus.on('building:destroyed', (e) => { if (!this.mirror) this.onBuildingDestroyed(e.id, e.x, e.z); });
+    bus.on('bridge:destroyed', (e) => { if (!this.mirror) this.onBridgeDestroyed(e.edgeId, e.geom); });
+    bus.on('nav:edge', (e) => { if (!e.open && !this.mirror) this.onEdgeClosed(e.edgeId); });
+    bus.on('city:captured', (e) => { if (!this.mirror) this.setController(e.cityId, e.by); });
   }
 
   private bldCityOf(id: number, x: number, z: number): CivilCity | null {
@@ -1104,13 +1109,18 @@ export class CivilianSystem {
     if (dtGameHours > 0) {
       this.clock += dtGameHours * 3600;
       this.hours += dtGameHours;
-      this.simulate(dtGameHours);
+      if (!this.mirror) this.simulate(dtGameHours);
     }
-    this.fillPlans(500);
-    this.flushCasualties();
+    if (!this.mirror) {
+      this.fillPlans(500);
+      this.flushCasualties();
+    }
     this.aidAccH += dtGameHours;
     this.aidAccReal += realDt;
-    if (this.aidAccReal >= 0.3) {
+    if (this.aidAccReal >= 0.3 && this.mirror) {
+      this.aidAccH = 0;
+      this.aidAccReal = 0;
+    } else if (this.aidAccReal >= 0.3) {
       this.processAid(this.aidAccH);
       this.aidAccH = 0;
       this.aidAccReal = 0;

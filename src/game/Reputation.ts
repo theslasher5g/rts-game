@@ -119,6 +119,11 @@ export class Reputation {
     return b === 'BUND' ? 35 : b === 'PAKT' ? -10 : 0;
   }
 
+  /** Mehrspieler (Gast): Ansehen aus dem Host-Schnappschuss übernehmen (ohne Ereignis) */
+  setRemoteValue(a3: string, v: number): void {
+    this.rep.set(a3, v);
+  }
+
   value(a3: string): number {
     const v = this.rep.get(a3);
     return v === undefined ? this.baseline(a3) : v;
