@@ -200,4 +200,9 @@ export interface GameEvents {
   'mission:ended': { missionId: string; result: 'victory' | 'defeat'; reason: string };
   'tutorial:step': { index: number; total: number; text: string };
   'fog:revealed': { a3: string; cells: number };
+  // Phase 7 – Mehrspieler, Fähigkeiten, Meldungen
+  'net:state': { role: 'host' | 'guest' | 'offline'; connected: boolean };
+  'ability:used': { id: string; a3: string; x: number; z: number };
+  /** Lagemeldung (Funkspruch): erscheint im Ereignisprotokoll, optional mit Kartenposition zum Anspringen */
+  'alert': { a3: string; kind: 'info' | 'warn' | 'danger'; text: string; x?: number; z?: number };
 }
