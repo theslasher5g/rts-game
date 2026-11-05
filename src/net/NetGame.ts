@@ -30,6 +30,8 @@ export interface NetGameOptions {
   /** Nationen unter KI-Kontrolle (Befehle von Gästen für diese Nationen werden verworfen) */
   aiNations: string[];
   seed: number;
+  /** Diplomatiemodus ('teams'|'ffa'), wird mit dem Voll-Schnappschuss an Gäste gesendet */
+  mode?: 'teams' | 'ffa';
   /** Ansehen (Reputation-Objekt) für Schnappschuss/Spiegel */
   reputation?: Reputation | null;
   /** Fähigkeiten-System (optional, Objekt mit use(...)) */
@@ -97,7 +99,7 @@ export class NetGame {
         },
         targets, opts.command,
       );
-      this.hostSync = new HostSync(ctx, transport, { intervalMs: opts.snapshotIntervalMs, reputation: opts.reputation ?? null, now: opts.now });
+      this.hostSync = new HostSync(ctx, transport, { mode: opts.mode, intervalMs: opts.snapshotIntervalMs, reputation: opts.reputation ?? null, now: opts.now });
       this.restore.push(() => { this.commands?.dispose(); this.hostSync?.dispose(); });
     }
     this.restore.push(transport.onPeersChanged(() => { /* Peerliste liest der Transport selbst */ }));

@@ -24,6 +24,8 @@ export type EndAction = 'next' | 'retry' | 'menu';
 export class EndScreen {
   /** Rückgabe true = vollständig behandelt (kein automatisches location.reload() bei 'menu') */
   onAction: ((a: EndAction) => void | boolean) | null = null;
+  /** true = Endbildschirm der Missionen unterdrücken (Mehrspieler zeigt sein eigenes Ergebnis) */
+  suppress = false;
 
   private readonly root: HTMLElement;
   private readonly missions: MissionSystem | null;
@@ -34,6 +36,7 @@ export class EndScreen {
     this.root = root;
     this.missions = missions;
     bus.on('mission:ended', () => {
+      if (this.suppress) return;
       window.clearTimeout(this.timer);
       this.timer = window.setTimeout(() => {
         const m = this.missions;

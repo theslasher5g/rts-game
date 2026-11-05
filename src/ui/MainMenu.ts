@@ -31,6 +31,10 @@ export class MainMenu {
   private selectedA3: string | null = null;
   private isVisible = false;
   private lobby: LobbyPanel | null = null;
+  /** Lobby-Fenster (Mehrspieler): main.ts liest daraus die Sitzung (Transport, Spielerliste) */
+  get lobbyPanel(): LobbyPanel | null {
+    return this.lobby;
+  }
 
   /**
    * Wird mit dem Seed aufgerufen, wenn „Zufallskarte" / ein neuer Seed bestätigt wird. Solange nichts gesetzt ist,

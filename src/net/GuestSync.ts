@@ -12,6 +12,7 @@ import type { StructureKind } from '../combat/types';
 import { SPEED_HOURS_PER_SEC } from '../game/GameState';
 import type { GameContext } from '../game/context';
 import type { Reputation } from '../game/Reputation';
+import { applyDiplomacyMode, type DiplomacyMode } from '../game/countryData';
 import type { BaseKind, ConvoyInfo, OilFieldInfo } from '../logistics/types';
 import type { Order, Unit } from '../units/types';
 import {
@@ -82,6 +83,7 @@ export class GuestSync {
   private readonly rs = new Map<number, RemoteState>();
   private types: string[] = [];
   private haveFull = false;
+  private dm = '';
   private lastSeq = 0;
   private lastArrival = 0;
   private hps = 0;
@@ -218,6 +220,7 @@ export class GuestSync {
     ctx.war.ceasefire = s.g[3] === 1;
     this.hps = SPEED_HOURS_PER_SEC[Math.min(5, Math.max(0, Math.round(s.g[1])))] ?? 0;
 
+    if (s.dm && s.dm !== this.dm) { this.dm = s.dm; applyDiplomacyMode(s.dm as DiplomacyMode); }
     if (s.wars) this.applyWars(s.wars);
 
     for (const r of s.oil) {

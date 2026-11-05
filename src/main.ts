@@ -10,9 +10,16 @@ import type { Settings } from './core/types';
 import { RTSCamera } from './camera/RTSCamera';
 import { SelectionController } from './control/SelectionController';
 import { AICommander } from './ai/AICommander';
+import { AbilitySystem } from './abilities/AbilitySystem';
+import { AbilityBar } from './ui/AbilityBar';
+import { AlertSource } from './ui/AlertSource';
+import { EventLog } from './ui/EventLog';
+import { FieldBars } from './ui/FieldBars';
 import { Sfx } from './audio/Sfx';
+import { NetGame } from './net/NetGame';
 import { FogOfWar } from './fog/FogOfWar';
 import type { GameContext } from './game/context';
+import { mpDiplomacy } from './game/scenario';
 import { MissionSystem, Tutorial, nextMissionId, resolveMission } from './game/missions';
 import { EndScreen } from './ui/EndScreen';
 import { ProtectBanner } from './ui/ProtectBanner';
@@ -30,7 +37,7 @@ import { Reputation } from './game/Reputation';
 import { CivilPanel } from './ui/CivilPanel';
 import { CombatSystem } from './combat/CombatSystem';
 import { Effects } from './fx/Effects';
-import { START_PROFILES, getProfile } from './game/countryData';
+import { START_PROFILES, applyDiplomacyMode, getProfile } from './game/countryData';
 import { War } from './game/War';
 import { BridgeRenderer } from './structures/BridgeRenderer';
 import { StructureManager } from './structures/StructureManager';
@@ -160,6 +167,47 @@ async function boot() {
   const tutorial = new Tutorial({ ctx, getCameraDistance: () => rts.distance, getSelectedIds: () => ctl.selectedUnits().map((u) => u.id) });
   const tutorialOverlay = new TutorialOverlay(uiRoot, tutorial);
   const protectBanner = new ProtectBanner(uiRoot, state);
+
+  // --- Fähigkeiten, Funkprotokoll, Ölfeld-Balken (Phase 7)
+  const nationColour = (a3: string) => getProfile(a3)?.color ?? '#cccccc';
+  const alliesOfPlayer = () => getProfile(state.playerA3 ?? '')?.allies ?? [];
+  const abilities = new AbilitySystem(ctx, { combat, fog, protection, exag: settings.heightExaggeration });
+  // Während des Grenzschutzes sind Kampffähigkeiten gesperrt (kein Gefecht)
+  const abilityPort = {
+    defs: abilities.defs,
+    use: (a3: string, id: string, x: number, z: number) => {
+      const def = abilities.def(id);
+      if (war.ceasefire && def?.damaging) return { ok: false, reason: 'Grenzschutz läuft – keine Kampffähigkeiten' };
+      return abilities.use(a3, id, x, z);
+    },
+    cooldownLeft: (a3: string, id: string) => abilities.cooldownLeft(a3, id),
+    checkTarget: (a3: string, id: string, x: number, z: number) => abilities.checkTarget(a3, id, x, z),
+  };
+  const toNdc = (cx: number, cy: number) => {
+    const r = canvas.getBoundingClientRect();
+    return picker.pick(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1, rts.camera);
+  };
+  const abilityBar = new AbilityBar(uiRoot, {
+    abilities: abilityPort,
+    getPlayer: playerOf,
+    getBarrels: () => (state.playerA3 ? economy.pool(state.playerA3).barrels : 0),
+    getCamera: () => rts.camera,
+    canvas,
+    pick: (cx, cy) => toNdc(cx, cy),
+    groundY: (x, z) => picker.groundY(x, z),
+    getGameHours: () => state.date.getTime() / 3.6e6,
+    keys: ctl,
+  });
+  const eventLog = new EventLog(uiRoot, {
+    getPlayer: playerOf,
+    getAllies: alliesOfPlayer,
+    getTimeLabel: () => state.date.toISOString().slice(11, 16),
+    minimap,
+  });
+  const alerts = new AlertSource(ctx, playerOf, alliesOfPlayer);
+  void alerts;
+  const fieldBars = new FieldBars(uiRoot, economy, () => rts.camera, nationColour, { groundY: (x, z) => picker.groundY(x, z), isVisible: (x, z) => fog.isExplored(x, z) });
+  ctl.baseProvider = () => (state.playerA3 ? economy.basesOf(state.playerA3) : []);
   // Grenzschutz: Gebiet von Verbündeten ist für eigene Einheiten offen
   units.borderFriendly = (owner, a3) => !!getProfile(owner)?.allies.includes(a3) || !!getProfile(a3)?.allies.includes(owner);
   let protectActive = false;
@@ -178,6 +226,8 @@ async function boot() {
     }
   };
   const ais: AICommander[] = [];
+  // Mehrspieler (Host-autoritativ): null im Einzelspiel
+  let net: NetGame | null = null;
   let aiHeld = false;
   endScreen.onAction = (a) => {
     if (a === 'menu') return false;
@@ -210,6 +260,7 @@ async function boot() {
     structures.applySettings(s);
     economy.applySettings(s);
     fog.applySettings(s);
+    abilities.applySettings(s);
     production.applySettings(s);
     civil.applySettings(s);
     worldDetail.applySettings(s);
@@ -228,7 +279,11 @@ async function boot() {
     labels.setSelected(id);
   });
   bus.on('camera:focus', ({ x, z, distance }) => rts.focus(x, z, distance));
-  bus.on('game:start', ({ countryA3, missionId }) => {
+  bus.on('game:start', ({ countryA3, missionId, mp }) => {
+    // Diplomatie je Modus: Kampagne/Gefecht (Pannonien neutral), außer wenn man selbst Pannonien spielt (2 gegen 2)
+    const session = mp ? menu.lobbyPanel?.session ?? null : null;
+    const mpInfo = session?.startInfo ?? null;
+    applyDiplomacyMode(mp ? mp.mode : countryA3 === 'PAN' ? 'teams' : 'campaign');
     const c = geo.countriesByA3.get(countryA3);
     playerId = c?.id ?? 0;
     state.startGame(countryA3);
@@ -242,10 +297,15 @@ async function boot() {
     ctl.enabled = true;
     unitPanel.show();
     if (civilToggle) civilToggle.style.display = '';
-    for (const [a, b] of state.scenarioWars()) war.declare(a, b);
-    for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
+    const isGuest = !!mp && mp.role === 'guest';
+    for (const [a, b] of mp ? mpDiplomacy(mp.mode).wars : state.scenarioWars()) war.declare(a, b);
+    // Gäste erzeugen keine Einheiten: der Host schickt sie per Schnappschuss
+    if (!isGuest) for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
     economy.loadScenario(geo.meta.scenario);
     prodPanel.show();
+    abilityBar.show();
+    eventLog.clear();
+    eventLog.show();
     // Mission, Nebel, KI-Befehlshaber
     const def = resolveMission(missionId, countryA3);
     fog.setEnabled(settings.fogOfWar !== false);
@@ -256,21 +316,66 @@ async function boot() {
       for (const f of economy.fields) if (f.owner === countryA3) fog.revealArea(f.x, f.z, 7);
     }
     fog.updateNow();
-    missions.load(def);
+    if (!mp) missions.load(def);
     for (const a of ais) a.dispose();
     ais.length = 0;
-    for (const p of START_PROFILES) {
+    const wars = war.listPairs();
+    // Mehrspieler: Nationen ohne Mensch werden (wenn gewünscht) vom Host per KI geführt, Gäste führen keine KI aus
+    if (mp && mpInfo && !isGuest) {
+      for (const a3 of mpInfo.aiNations) ais.push(new AICommander(ctx, { a3, difficulty: 'mittel', style: 'aggressor', econ: econAI }));
+    }
+    for (const p of mp ? [] : START_PROFILES) {
       if (p.a3 === countryA3) continue;
-      ais.push(new AICommander(ctx, { a3: p.a3, difficulty: def.ai.difficulty, style: war.isHostile(p.a3, countryA3) ? 'aggressor' : 'defender', econ: econAI }));
+      const atWar = wars.some(([x, y]) => x === p.a3 || y === p.a3);
+      const allied = !!getProfile(countryA3)?.allies.includes(p.a3);
+      if (!atWar && !allied) continue; // neutrale Nationen (Pannonien in der Kampagne) bekommen keinen Befehlshaber
+      ais.push(new AICommander(ctx, { a3: p.a3, difficulty: def.ai.difficulty, style: atWar ? 'aggressor' : 'defender', econ: econAI }));
     }
     aiHeld = false;
     // Grenzschutz: 10 Minuten Echtzeit im freien Gefecht (Kampagne: Zeitplan der Mission gilt)
-    state.borderProtectSec = def.id === 'skirmish' ? 600 : 0;
+    state.borderProtectSec = mp || def.id === 'skirmish' ? 600 : 0;
     syncProtection();
-    if (missions.wantsTutorial) tutorial.start();
+    if (!mp && missions.wantsTutorial) tutorial.start();
+    // Netzwerk: Host rechnet, Gäste spiegeln (Befehle laufen per Proxy zum Host)
+    if (net) net.dispose();
+    net = null;
+    endScreen.suppress = !!mp;
+    if (mp && session && mpInfo) {
+      net = new NetGame(ctx, session.transport, {
+        role: mp.role,
+        selfA3: countryA3,
+        nationOfPeer: (peerId) => mpInfo.players.find((p) => p.id === peerId)?.a3 ?? null,
+        aiNations: mpInfo.aiNations,
+        seed: mp.seed,
+        mode: mp.mode,
+        reputation,
+        abilities: abilities as unknown as { use: (...args: unknown[]) => unknown },
+      });
+    }
     const hq = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3)?.hq;
     if (hq) rts.focus(hq[0], hq[1], 80);
     else if (c) rts.focus(c.label[0], c.label[1], 80);
+  });
+
+  // Mehrspieler: einfaches Ergebnis (Sieg/Niederlage für das eigene Team)
+  bus.on('mission:ended', ({ result, reason }) => {
+    if (!net) return;
+    const el = document.createElement('div');
+    el.style.cssText =
+      'position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;' +
+      "background:rgba(10,12,8,.78);font-family:'Share Tech Mono',monospace;color:#e8dfb4;text-align:center;";
+    const h = document.createElement('div');
+    h.style.cssText = `font-size:64px;letter-spacing:.3em;color:${result === 'victory' ? '#7fd26a' : '#d96a5a'};`;
+    h.textContent = result === 'victory' ? 'SIEG' : 'NIEDERLAGE';
+    const r = document.createElement('div');
+    r.style.cssText = 'font-size:16px;max-width:560px;';
+    r.textContent = reason;
+    const b = document.createElement('button');
+    b.className = 'btn btn-primary';
+    b.textContent = 'Zurück zum Hauptmenü';
+    b.addEventListener('click', () => location.reload());
+    el.append(h, r, b);
+    uiRoot.appendChild(el);
   });
 
   // Hover jedes Frame neu bestimmen (auch wenn sich nur die Kamera bewegt) – Picking kostet ~µs.
@@ -288,6 +393,10 @@ async function boot() {
   input.onClick((e) => {
     const { ndcX, ndcY, button, double } = e;
     if (button !== 0) return;
+    if (abilityBar.isTargeting()) {
+      const h = picker.pick(ndcX, ndcY, rts.camera);
+      if (h && abilityBar.onMapClick(h.x, h.z)) return;
+    }
     if (prodPanel.isTargeting()) {
       const h = picker.pick(ndcX, ndcY, rts.camera);
       if (h && prodPanel.onMapClick(h.x, h.z)) return;
@@ -321,20 +430,22 @@ async function boot() {
     rts.update(dt);
     updateHover();
     state.update(dt);
+    net?.frame(dt, state.lastHours);
     syncProtection();
     protectBanner.update();
     units.update(state.lastHours);
     const gameSec = state.lastHours * 3600;
     // Der Kampf rechnet je Frame höchstens 3 Spielsekunden: genau diese Rate muss die Effekt-Darstellung kennen
     effects.timeScale = dt > 0 ? Math.max(1, Math.min(gameSec, 3) / dt) : 1;
-    tactics.update(gameSec, dt);
+    if (!net || net.simulates) tactics.update(gameSec, dt);
     combat.update(gameSec);
+    abilities.update(state.lastHours);
     structures.update(state.lastHours, dt);
     if (state.playerA3) {
       economy.update(state.lastHours, dt);
       supply.update(state.lastHours, dt);
       production.update(state.lastHours, dt);
-      econAI.update(state.lastHours);
+      if (!net || net.simulates) econAI.update(state.lastHours);
       const hold = missions.aiHeld();
       if (hold !== aiHeld) {
         aiHeld = hold;
@@ -342,13 +453,15 @@ async function boot() {
       }
       for (const a of ais) a.update(state.lastHours, dt);
       fog.update(state.lastHours, dt);
-      missions.update(state.lastHours);
+      if (!net) missions.update(state.lastHours);
     }
     if (state.lastHours > 0) {
       civil.update(state.lastHours, dt, rts.camera);
-      protection.update(state.lastHours);
-      reputation.update(state.lastHours);
-      occupation.update(state.lastHours);
+      if (!net || net.simulates) {
+        protection.update(state.lastHours);
+        reputation.update(state.lastHours);
+        occupation.update(state.lastHours);
+      }
       if (state.playerA3) {
         state.zufriedenheit = Math.max(0, Math.min(100, state.zufriedenheit + reputation.consumeSatisfactionDelta(state.playerA3)));
       }
@@ -373,6 +486,7 @@ async function boot() {
       unitPanel.update(dt);
       civilPanel.update(dt);
       prodPanel.update(dt);
+      fieldBars.update();
       missionPanel.update(dt);
       tutorial.update(dt);
       tutorialOverlay.update(dt);
@@ -397,7 +511,7 @@ async function boot() {
   }
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, economy, supply, production, fog, missions, ais };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, economy, supply, production, fog, missions, ais, abilities, abilityBar, eventLog, menu, getNet: () => net };
 }
 
 boot().catch((err: unknown) => {

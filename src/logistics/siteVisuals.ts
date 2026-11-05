@@ -465,7 +465,7 @@ export class SiteLayer {
     this.object.add(sm);
     for (const k of ICON_KINDS) {
       const map = iconTexture(k);
-      const mat = new THREE.PointsMaterial({ size: 30, sizeAttenuation: false, vertexColors: true, map, transparent: true, alphaTest: 0.35, depthTest: false, depthWrite: false, fog: false });
+      const mat = new THREE.PointsMaterial({ size: 12, sizeAttenuation: false, vertexColors: true, map, transparent: true, alphaTest: 0.35, depthTest: false, depthWrite: false, fog: false });
       const p = new THREE.Points(new THREE.BufferGeometry(), mat);
       p.frustumCulled = false;
       p.renderOrder = 7;

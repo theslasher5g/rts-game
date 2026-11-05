@@ -22,6 +22,8 @@ export interface HostSyncOptions {
   fullEveryMs?: number;
   /** Ansehen der Nationen mitsenden */
   reputation?: Pick<Reputation, 'value'> | null;
+  /** Diplomatiemodus (applyDiplomacyMode) für Gäste mitsenden */
+  mode?: string;
   /** Begrenzung combat:fire / combat:impact je Intervall (Standard 100) */
   fxBudget?: number;
   /** Zeitquelle (Tests) */
@@ -74,6 +76,7 @@ export class HostSync {
   private readonly fullEvery: number;
   private readonly rep: Pick<Reputation, 'value'> | null;
   private readonly fxBudgetMax: number;
+  private readonly mode: string | undefined;
   private readonly now: () => number;
   private readonly offs: Array<() => void> = [];
 
@@ -114,6 +117,7 @@ export class HostSync {
     this.interval = opts.intervalMs ?? 100;
     this.fullEvery = opts.fullEveryMs ?? 3000;
     this.rep = opts.reputation ?? null;
+    this.mode = opts.mode;
     this.fxBudgetMax = opts.fxBudget ?? 100;
     this.fxLeft = this.fxBudgetMax;
     this.now = opts.now ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
@@ -246,6 +250,7 @@ export class HostSync {
     if (full) this.baseEdges = ceKey;
     snap.ow = this.owners.slice();
     if (full) snap.tt = this.types.slice();
+    if (full && this.mode) snap.dm = this.mode;
     return snap;
   }
 
@@ -278,55 +283,30 @@ export class HostSync {
   private buildEconomy(snap: NetSnapshot, full: boolean): void {
     const { economy, production } = this.ctx;
     // Felder
-    const fl: number[][] = [];
     for (const f of economy.fields) {
-      const row = [f.id, f.owner ? this.own(f.owner) + 1 : 0, q(f.stored, 10), q(f.integrity, 1000), (f.cutOff ? 1 : 0) | (f.burning ? 2 : 0), q(f.captureProgress ?? 0, 1000), f.capturer ? this.own(f.capturer) + 1 : 0];
-      if (full || !sameRow(this.fieldRows.get(f.id), row)) fl.push(row);
-      this.fieldRows.set(f.id, row);
+      this.dFields.add(f.id, [f.id, f.owner ? this.own(f.owner) + 1 : 0, q(f.stored, 10), q(f.integrity, 1000), (f.cutOff ? 1 : 0) | (f.burning ? 2 : 0), q(f.captureProgress ?? 0, 1000), f.capturer ? this.own(f.capturer) + 1 : 0]);
     }
-    if (fl.length) snap.fl = fl;
+    const fl = this.dFields.finish(full);
+    if (fl.rows.length) snap.fl = fl.rows;
     // Basen
-    const bs: Array<Array<number | string>> = [];
-    const seenB = new Set<number>();
-    for (const b of economy.bases.values()) {
-      seenB.add(b.id);
-      const row = this.baseRow(b);
-      if (full || !sameRow(this.baseRows.get(b.id), row)) bs.push(row);
-      this.baseRows.set(b.id, row);
-    }
-    const bd: number[] = [];
-    for (const id of this.baseRows.keys()) if (!seenB.has(id)) bd.push(id);
-    for (const id of bd) this.baseRows.delete(id);
-    if (bs.length) snap.bs = bs;
-    if (bd.length) snap.bd = bd;
+    for (const b of economy.bases.values()) this.dBases.add(b.id, this.baseRow(b));
+    const bs = this.dBases.finish(full);
+    if (bs.rows.length) snap.bs = bs.rows;
+    if (bs.gone.length) snap.bd = bs.gone;
     // Produktionsaufträge
-    const po: Array<Array<number | string>> = [];
-    const seenO = new Set<number>();
     for (const o of production.orders.values()) {
-      seenO.add(o.id);
-      const row = [o.id, o.baseId, o.typeId, q(o.remainingHours, 1000), q(o.totalHours, 1000), o.rallyX !== undefined ? q(o.rallyX, 1000) : -1, o.rallyZ !== undefined ? q(o.rallyZ, 1000) : -1, Math.round(o.price ?? 0), this.own(o.owner ?? economy.bases.get(o.baseId)?.owner ?? '')];
-      if (full || !sameRow(this.orderRows.get(o.id), row)) po.push(row);
-      this.orderRows.set(o.id, row);
+      this.dOrders.add(o.id, [o.id, o.baseId, o.typeId, q(o.remainingHours, 1000), q(o.totalHours, 1000), o.rallyX !== undefined ? q(o.rallyX, 1000) : -1, o.rallyZ !== undefined ? q(o.rallyZ, 1000) : -1, Math.round(o.price ?? 0), this.own(o.owner ?? economy.bases.get(o.baseId)?.owner ?? '')]);
     }
-    const pd: number[] = [];
-    for (const id of this.orderRows.keys()) if (!seenO.has(id)) pd.push(id);
-    for (const id of pd) this.orderRows.delete(id);
-    if (po.length) snap.po = po;
-    if (pd.length) snap.pd = pd;
+    const po = this.dOrders.finish(full);
+    if (po.rows.length) snap.po = po.rows;
+    if (po.gone.length) snap.pd = po.gone;
     // Konvois
-    const cv: number[][] = [];
-    const seenC = new Set<number>();
     for (const c of economy.convoys.values()) {
-      seenC.add(c.id);
-      const row = [c.id, c.kind === 'oil' ? 0 : 1, this.own(c.owner), c.fromBaseId, c.toBaseId, Math.round(c.cargo), c.unitId, Math.max(0, CONVOY_STATES.indexOf((c.state ?? '') as (typeof CONVOY_STATES)[number])), c.fieldId ?? -1];
-      if (full || !sameRow(this.convoyRows.get(c.id), row)) cv.push(row);
-      this.convoyRows.set(c.id, row);
+      this.dConvoys.add(c.id, [c.id, c.kind === 'oil' ? 0 : 1, this.own(c.owner), c.fromBaseId, c.toBaseId, Math.round(c.cargo), c.unitId, Math.max(0, CONVOY_STATES.indexOf((c.state ?? '') as (typeof CONVOY_STATES)[number])), c.fieldId ?? -1]);
     }
-    const cd: number[] = [];
-    for (const id of this.convoyRows.keys()) if (!seenC.has(id)) cd.push(id);
-    for (const id of cd) this.convoyRows.delete(id);
-    if (cv.length) snap.cv = cv;
-    if (cd.length) snap.cd = cd;
+    const cv = this.dConvoys.finish(full);
+    if (cv.rows.length) snap.cv = cv.rows;
+    if (cv.gone.length) snap.cd = cv.gone;
   }
 
   private baseRow(b: BaseInfo): Array<number | string> {
@@ -335,56 +315,46 @@ export class HostSync {
 
   private buildStructures(snap: NetSnapshot, full: boolean): void {
     const { structures } = this.ctx;
-    const st: Array<Array<number | string>> = [];
-    const sn: NonNullable<NetSnapshot['sn']> = [];
-    const seen = new Set<number>();
+    const d = this.dStructs;
+    const live = new Set<number>();
     for (const s of structures.structures.values()) {
-      seen.add(s.id);
-      if (full || !this.structSent.has(s.id)) {
+      live.add(s.id);
+      if (!this.structGeo.has(s.id)) {
         const ex = structures.exportRemote(s.id);
-        if (ex) sn.push([s.id, s.kind, this.own(s.owner), s.points.map((v) => Math.round(v * 1000) / 1000), q(ex.fx, 1000), q(ex.fz, 1000), ex.edgeId, Math.round(s.hpMax)]);
-        this.structSent.add(s.id);
+        if (ex) this.structGeo.set(s.id, [s.id, s.kind, this.own(s.owner), s.points.map((v) => Math.round(v * 1000) / 1000), q(ex.fx, 1000), q(ex.fz, 1000), ex.edgeId, Math.round(s.hpMax)]);
       }
-      const row = [s.id, s.kind, this.own(s.owner), q(s.progress, 1000), Math.round(s.hp), Math.round(s.hpMax)];
-      if (full || !sameRow(this.structRows.get(s.id), row)) st.push(row);
-      this.structRows.set(s.id, row);
+      d.add(s.id, [s.id, s.kind, this.own(s.owner), q(s.progress, 1000), Math.round(s.hp), Math.round(s.hpMax)]);
     }
-    const sd: number[] = [];
-    for (const id of this.structRows.keys()) if (!seen.has(id)) sd.push(id);
-    for (const id of sd) { this.structRows.delete(id); this.structSent.delete(id); }
+    const r = d.finish(full);
+    for (const id of Array.from(this.structGeo.keys())) if (!live.has(id)) this.structGeo.delete(id);
+    // Geometrie: alle, die der Gast nicht im Voll-Stand hatte (cumulativ), bzw. alle bei full
+    const sn: NonNullable<NetSnapshot['sn']> = [];
+    for (const row of r.rows) {
+      const id = row[0] as number;
+      const g = this.structGeo.get(id);
+      if (g && (full || !this.structBase.has(id))) sn.push(g);
+    }
+    if (full) { this.structBase.clear(); for (const id of d.base.keys()) this.structBase.add(id); }
     if (sn.length) snap.sn = sn;
-    if (st.length) snap.st = st;
-    if (sd.length) snap.sd = sd;
+    if (r.rows.length) snap.st = r.rows;
+    if (r.gone.length) snap.sd = r.gone;
   }
 
   private buildCivil(snap: NetSnapshot, full: boolean): void {
-    const { civil, cities } = this.ctx;
+    const { civil } = this.ctx;
     if (civil && civil.cities) {
-      const ci: number[][] = [];
       for (const c of civil.cities) {
-        const row = [c.id, Math.round(c.population), Math.round(c.killed), Math.round(c.refugees), q(c.evacuated, 1000), c.evacuating ? 1 : 0, q(c.satisfaction, 10), q(c.unrest, 1000), this.own(c.controller), Math.max(0, CITY_CONTROLS.indexOf(c.control)), q(c.damage, 1000)];
-        if (full || !sameRow(this.cityRows.get(c.id), row)) ci.push(row);
-        this.cityRows.set(c.id, row);
+        this.dCities.add(c.id, [c.id, Math.round(c.population), Math.round(c.killed), Math.round(c.refugees), q(c.evacuated, 1000), c.evacuating ? 1 : 0, q(c.satisfaction, 10), q(c.unrest, 1000), this.own(c.controller), Math.max(0, CITY_CONTROLS.indexOf(c.control)), q(c.damage, 1000)]);
       }
-      if (ci.length) snap.ci = ci;
-      const inf: number[][] = [];
-      for (const it of civil.infra) {
-        const row = [it.id, q(it.integrity, 1000)];
-        if (full || !sameRow(this.infraRows.get(it.id), row)) inf.push(row);
-        this.infraRows.set(it.id, row);
-      }
-      if (inf.length) snap.inf = inf;
+      const ci = this.dCities.finish(full);
+      if (ci.rows.length) snap.ci = ci.rows;
+      for (const it of civil.infra) this.dInfra.add(it.id, [it.id, q(it.integrity, 1000)]);
+      const inf = this.dInfra.finish(full);
+      if (inf.rows.length) snap.inf = inf.rows;
     }
-    void cities;
-    // Gebäude-Integrität
-    const bl: number[][] = [];
-    if (full) {
-      for (const [id, v] of this.bldAll) bl.push([id, q(v, 1000)]);
-      this.bldDirty.clear();
-    } else if (this.bldDirty.size) {
-      for (const id of this.bldDirty) bl.push([id, q(this.bldAll.get(id) ?? 1, 1000)]);
-      this.bldDirty.clear();
-    }
-    if (bl.length) snap.bl = bl;
+    // Gebäude-Integrität (beschädigte Gebäude)
+    for (const [id, v] of this.bldAll) this.dBld.add(id, [id, q(v, 1000)]);
+    const bl = this.dBld.finish(full);
+    if (bl.rows.length) snap.bl = bl.rows;
   }
 }

@@ -43,6 +43,8 @@ export interface NetSnapshot {
   tt?: string[];
   /** [Datum ms, Geschwindigkeitsstufe, Grenzschutz s ×10, Waffenstillstand 0/1, Fortschrittsmarke Spielende 0/1] */
   g: number[];
+  /** Diplomatiemodus ('teams' | 'ffa' | 'campaign'), nur bei full */
+  dm?: string;
   /** Kriegspaare "A|B" (bei full oder Änderung) */
   wars?: string[];
   /** je Nation: [ownerIdx, Fässer, Einnahmen ×100, Ausgaben ×100, unterwegs, geliefert, Konvoiverluste, Fässerverluste] */
