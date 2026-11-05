@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GeoData } from './GeoData';
+import { SCALE } from '../core/scale';
 import { SUN_COLOR, SUN_DIR } from './Terrain';
 import { getBuildingMaterial, lin, rngFrom, terrainHeightKm, type V3 } from './BuildingModels';
 
@@ -344,7 +345,7 @@ function propMat(): THREE.ShaderMaterial {
         ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
         uExag: { value: 6 },
         uHS: { value: 2.25 },
-        uStrat: { value: 1 },
+        uStrat: { value: SCALE.props },
         uLift: { value: 0.012 },
         uNight: bm.uniforms.uNight,
         uSunDir: { value: SUN_DIR.clone() },
@@ -366,7 +367,7 @@ export function setPropParams(exag: number, camY: number): void {
   const u = propMat().uniforms;
   u.uExag.value = exag;
   u.uHS.value = 1 + (exag - 1) * 0.25;
-  u.uStrat.value = THREE.MathUtils.clamp(1 + (camY - 6) / 10, 1, 3);
+  u.uStrat.value = SCALE.props; // fester Maßstab (kein Wachsen mit der Kamerahöhe)
   u.uLift.value = THREE.MathUtils.clamp(0.008 + camY * 0.0016, 0.008, 3);
 }
 

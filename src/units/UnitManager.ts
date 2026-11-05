@@ -147,6 +147,28 @@ interface ForceStats {
 export class UnitManager {
   readonly units: Unit[] = [];
 
+  /**
+   * Mehrspieler (Gast): true = Spiegel. update() simuliert nichts (keine Bewegung, kein Routing), pflegt nur Bodenhöhe,
+   * Flughöhe und Spatial-Hash. Einheiten kommen per spawnRemote/removeRemote aus den Host-Schnappschüssen.
+   */
+  mirror = false;
+
+  /** Grenzschutz: solange true, dürfen Einheiten kein fremdes Staatsgebiet betreten (Verbündete ausgenommen) */
+  borderClosed = false;
+  /** Liefert true, wenn Gebiet des Landes `a3` für Einheiten von `owner` offen ist (eigenes Land, Verbündete) */
+  borderFriendly: ((owner: string, a3: string) => boolean) | null = null;
+  private borderToastAt = 0;
+
+  /** true = Position (x,z) darf von u betreten werden */
+  private borderOk(u: Unit, x: number, z: number): boolean {
+    const cid = this.geo.countryAt(x, z);
+    if (cid === 0) return true; // Meer / Küstengewässer
+    if (u.type.id === 'tanker_truck') return true; // Öltransporte dürfen Umwege über fremdes Gebiet fahren
+    const a3 = this.geo.countriesById.get(cid)?.a3;
+    if (!a3 || a3 === u.owner) return true;
+    return this.borderFriendly ? this.borderFriendly(u.owner, a3) : false;
+  }
+
   /** Phase 4: Bremsfaktor durch Flüchtlingsströme auf Straßen (1 = frei, bis 0.3); von main.ts gesetzt */
   roadSpeedFactor: ((x: number, z: number) => number) | null = null;
 
@@ -170,7 +192,7 @@ export class UnitManager {
     this.routes = routes;
     this.exag = settings.heightExaggeration;
     bus.on('nav:edge', ({ open }) => {
-      if (open) return;
+      if (open || this.mirror) return;
       // Kante gesperrt: alle fahrenden Boden-/Marineeinheiten neu routen (lazy über die Queue)
       for (const u of this.units) {
         if (u.route && u.type.mobility.domain !== 'air') {
@@ -257,6 +279,51 @@ export class UnitManager {
     this.motion.delete(id);
     this.hashDirty = true;
     bus.emit('unit:removed', { id });
+  }
+
+  // ------------------------------------------------------------------ Mehrspieler (Gast-Spiegel)
+
+  /** Gast: Einheit mit vorgegebener ID anlegen (kein Routing, keine ID-Vergabe, kein Einrasten auf Gelände). */
+  spawnRemote(id: number, typeId: string, owner: string, x: number, z: number, heading = 0, name?: string): Unit | null {
+    const existing = this.byId.get(id);
+    if (existing) return existing;
+    const type = getUnitType(typeId);
+    if (!type) return null;
+    const u: Unit = {
+      id, type, owner, x, z, y: 0, heading: wrapAngle(heading), speedKmh: 0, hp: type.hp, ammo: type.ammo, fuel: type.fuelKm,
+      experience: 0.3, morale: 0.8, orders: [], route: null, routeKm: 0, groupSpeedCap: Infinity, formation: defaultFormation(type.category),
+      selected: false, name: name ?? `${type.short} ${id}`, stance: 'free', airborne: false, onRoad: false, routePending: false,
+    };
+    const m: Motion = { seg: 0, segT: 0, routeLen: 0, faceGoal: NaN, alt: 0, loiter: false, loiterCx: x, loiterCz: z, loiterA: 0, cellX: 0, cellZ: 0 };
+    this.units.push(u);
+    this.byId.set(id, u);
+    this.motion.set(id, m);
+    this.updateY(u, m);
+    this.hashDirty = true;
+    if (id >= this.nextId) this.nextId = id + 1;
+    bus.emit('unit:spawned', { id });
+    return u;
+  }
+
+  /** Gast: Einheit entfernen (idempotent). */
+  removeRemote(id: number): void {
+    this.remove(id);
+  }
+
+  /** Gast: Flughöhe/Bodenhöhe nachführen (Host berechnet sie in step()) */
+  private updateMirror(dtHours: number): void {
+    const dt = dtHours > 0 ? dtHours : 0;
+    for (let i = 0; i < this.units.length; i++) {
+      const u = this.units[i];
+      const m = this.motion.get(u.id)!;
+      if (u.type.mobility.domain === 'air') {
+        const target = u.airborne ? ALTITUDE[u.type.model] ?? 0.3 : 0;
+        const rate = (CLIMB_RATE[u.type.category] ?? 20) * Math.max(dt, 1 / 3600 / 4);
+        m.alt = m.alt < target ? Math.min(target, m.alt + rate) : Math.max(target, m.alt - rate);
+      }
+      this.updateY(u, m);
+    }
+    this.rebuildHash();
   }
 
   // ------------------------------------------------------------------ Befehle
@@ -490,6 +557,10 @@ export class UnitManager {
   }
 
   update(dtHours: number): void {
+    if (this.mirror) {
+      this.updateMirror(dtHours);
+      return;
+    }
     this.processRouteQueue();
     const dt = dtHours > 0 ? dtHours : 0;
     this.updating = true;
@@ -687,8 +758,26 @@ export class UnitManager {
     m.seg = seg;
     m.segT = t;
     const f = sl > 1e-9 ? t / sl : 1;
-    u.x = pts[seg * 2] + (pts[seg * 2 + 2] - pts[seg * 2]) * f;
-    u.z = pts[seg * 2 + 1] + (pts[seg * 2 + 3] - pts[seg * 2 + 1]) * f;
+    const nx = pts[seg * 2] + (pts[seg * 2 + 2] - pts[seg * 2]) * f;
+    const nz = pts[seg * 2 + 1] + (pts[seg * 2 + 3] - pts[seg * 2 + 1]) * f;
+    if (this.borderClosed && !this.borderOk(u, nx, nz)) {
+      // Grenzschutz: an der Grenze anhalten, Befehle verwerfen
+      u.orders.length = 0;
+      u.route = null;
+      u.routeKm = 0;
+      m.seg = 0;
+      m.segT = 0;
+      u.speedKmh = 0;
+      u.onRoad = false;
+      const now = performance.now();
+      if (now - this.borderToastAt > 4000) {
+        this.borderToastAt = now;
+        bus.emit('toast', { msg: 'Grenze gesperrt – während des Grenzschutzes darf kein fremdes Gebiet betreten werden', kind: 'warn' });
+      }
+      return;
+    }
+    u.x = nx;
+    u.z = nz;
     u.routeKm += adv;
     if (Number.isFinite(u.fuel)) u.fuel = Math.max(0, u.fuel - adv);
     u.onRoad = r.segClass[seg] !== OFFROAD_CLASS && mob.domain === 'ground';

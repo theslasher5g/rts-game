@@ -3,8 +3,7 @@
  *
  * - RoadNet: Kachelindex (6 km) der Kanten, verdichtete Stützpunkte je Kante (Cache), Stadtnähe.
  * - GLSL-Bausteine: Geländehöhe auf der GPU (exakt wie Terrain: gleiche R16F-Textur, gleiche Dreieckszerlegung),
- *   „Straßenmaßstab“ S(d) = clamp(k·d, 1, Smax) – alles Quer-/Höhenmaß wächst mit dem Kameraabstand (strategische
- *   Sichtskala wie bei den Einheiten), damit 8–25 m breite Straßen lesbar bleiben.
+ *   „Straßenmaßstab“ S = SCALE.roadWidth (konstant) – Quer-/Höhenmaß der Bänder ist ein fester Faktor der realen Breite.
  * - Band-Builder (Ribbons): Vertex-Attribute für die Fahrbahn-Shader; Kreuzungen, Rampen, Rastplätze, Bahnübergänge.
  *
  * Alle Koordinaten in km (1 Einheit = 1 km), Höhen werden auf der GPU mit heightExaggeration multipliziert.
@@ -14,12 +13,12 @@ import type { GeoData } from '../world/GeoData';
 import type { NavGraph } from './NavGraph';
 import { getHeightTexture } from '../world/Terrain';
 import { cityRadiusKm } from '../world/Cities';
+import { SCALE } from '../core/scale';
 
 export const TILE_KM = 6;
 export const STEP_KM = 0.0625;
-/** Straßenmaßstab: Faktor je km Kameraabstand und Obergrenze */
-export const SCALE_K = 1.1;
-export const SCALE_MAX = 14;
+/** Straßenmaßstab: FESTER Breitenfaktor (SCALE.roadWidth), unabhängig vom Kameraabstand */
+export const ROAD_WIDTH_SCALE = SCALE.roadWidth;
 
 // ----------------------------------------------------------------------- Hash
 
@@ -79,8 +78,8 @@ export function getRoadUniforms(geo: GeoData): Record<string, THREE.IUniform> {
       uGrid: { value: new THREE.Vector2(geo.width, geo.height) },
       uCell: { value: geo.cellKm },
       uExag: { value: 6 },
-      uKS: { value: SCALE_K },
-      uSMax: { value: SCALE_MAX },
+      uKS: { value: 0 },
+      uSMax: { value: ROAD_WIDTH_SCALE },
     };
     uniformCache.set(geo, u);
   }
@@ -107,7 +106,7 @@ float groundKm(vec2 xz) {
   float h = (f.x + f.y <= 1.0) ? a + (b - a) * f.x + (c - a) * f.y : d + (c - d) * (1.0 - f.x) + (b - d) * (1.0 - f.y);
   return max(h, 0.0);
 }
-float roadScale(float d) { return clamp(d * uKS, 1.0, uSMax); }
+float roadScale(float d) { return uSMax; } // fester Breitenfaktor (uKS ungenutzt)
 `;
 
 /** CPU-Gegenstück zu groundKm (nur Höhe, nicht überhöht) – identisch zu terrainHeightKm */

@@ -16,15 +16,15 @@ import type { GeoData } from '../world/GeoData';
 import type { Unit, UnitTypeDef } from './types';
 import type { UnitManager } from './UnitManager';
 import { UNIT_TYPES } from './unitTypes';
+import { SCALE, counterDistanceKm, unitModelScale } from '../core/scale';
 import { buildModels, modelKeyFor, rotorGeometry, type ModelDef as ModelDefT } from './models';
 
 // ---------------------------------------------------------------- Tuning
-/** Sichtmaßstab = clamp(K · Kameraabstand, MIN, MAX) */
-export const VIS_SCALE_K = 4;
-export const VIS_SCALE_MIN = 3;
-export const VIS_SCALE_MAX = 600;
-/** Ab diesem Kameraabstand (km) NATO-Zeichen statt 3D-Modelle (± Hysterese) */
-export const COUNTER_DISTANCE = 120;
+/**
+ * Ab diesem Kameraabstand (km) NATO-Zeichen statt 3D-Modelle (± Hysterese): Referenzwert für 720 px Bildhöhe;
+ * zur Laufzeit wird die Schwelle aus SCALE.units, FOV und Bildschirmhöhe berechnet (siehe core/scale.ts).
+ */
+export const COUNTER_DISTANCE = counterDistanceKm(720);
 const COUNTER_HYST = 0.08;
 /** Zeichengröße (CSS-Pixel) */
 const COUNTER_PX = 36;
@@ -431,7 +431,7 @@ void main() {
 /** Nationen-ID für Tarnmuster (Soldaten-Material): 1 VAL alpin, 2 KRN khaki/braun, 3 MAR sand/oliv, 4 Wüste, 5 Wald (Rückfall) */
 const NATION_ID: Record<string, number> = { VAL: 1, KRN: 2, MAR: 3 };
 /** Kameraabstand (km), ab dem Soldaten in der Low-Detail-Variante gezeichnet werden */
-const SOLDIER_LOD_KM = 6;
+const SOLDIER_LOD_KM = 3.5;
 
 const ANIM_COMMON = /* glsl */ `
 vec3 S(float r, float g, float b) { return pow(vec3(r, g, b) / 255.0, vec3(2.2)) * 1.6; }
@@ -596,9 +596,9 @@ vec3 camoTint(vec3 p, float nat, vec3 base) {
 // ---------------------------------------------------------------- Fahrzeug-Material (Bodenfahrzeuge)
 
 /** Kameraabstand (km), ab dem Fahrzeuge in der Low-Detail-Variante gezeichnet werden */
-const VEH_LOD_KM = 12;
+const VEH_LOD_KM = 6;
 /** Ab diesem Kameraabstand (km) werden Fahrzeug-Animationen nicht mehr fortgeschrieben */
-const VEH_ANIM_KM = 25;
+const VEH_ANIM_KM = 5;
 
 const VEH_VERT_DECL = /* glsl */ `
 attribute float aPaint;
@@ -800,7 +800,8 @@ export class UnitRenderer {
   private readonly ringMat: THREE.MeshBasicMaterial;
 
   private counterMode = false;
-  private visScale = VIS_SCALE_MIN;
+  /** aktuelle Schwelle (km) für NATO-Zeichen (abhängig von der Bildschirmhöhe) */
+  private counterDist = COUNTER_DISTANCE;
   private pxKm = 0.01;
   private camDist = 100;
   private lastTime = 0;
@@ -936,7 +937,7 @@ export class UnitRenderer {
   visualRadiusKm(u: Unit): number {
     if (this.counterMode) return (COUNTER_PX * 0.5) * this.pxKm;
     const def = this.models[this.keyOf(u)];
-    if (!def) return 0.05 * this.visScale;
+    if (!def) return 0.1;
     return Math.max(this.unitRadius(def, u.type.memberCount), 10 * this.pxKm);
   }
 
@@ -967,7 +968,7 @@ export class UnitRenderer {
     let m = 0;
     const n = Math.min(v.off.length >> 1, Math.ceil(u.membersAlive ?? u.type.memberCount));
     for (let i = 0; i < n; i++) m = Math.max(m, Math.hypot(v.off[i * 2], v.off[i * 2 + 1]));
-    const r = this.visScale * 0.001 * (m + def.size * def.boost * 0.6);
+    const r = 0.001 * (m + def.size * this.modelScale(def) * 0.6);
     return Math.max(base * 0.5, r);
   }
 
@@ -978,7 +979,7 @@ export class UnitRenderer {
 
   /** aktueller Sichtmaßstab der Modelle (×) */
   get visualScale(): number {
-    return this.visScale;
+    return SCALE.units;
   }
 
   /** true = Fernansicht mit NATO-Zeichen */
@@ -1005,11 +1006,10 @@ export class UnitRenderer {
     this.lowLod = dist > SOLDIER_LOD_KM * (this.lowLod ? 0.9 : 1.1);
     this.lowLodVeh = dist > VEH_LOD_KM * (this.lowLodVeh ? 0.9 : 1.1);
     this.animTime.value = timeSec % 1024;
-    const thr = COUNTER_DISTANCE * (this.counterMode ? 1 - COUNTER_HYST : 1 + COUNTER_HYST);
-    this.counterMode = dist > thr;
-    const s = clamp(VIS_SCALE_K * dist, VIS_SCALE_MIN, VIS_SCALE_MAX);
-    this.visScale = s;
     const screenW = window.innerWidth || 1, screenH = window.innerHeight || 1;
+    this.counterDist = counterDistanceKm(screenH, camera.fov);
+    const thr = this.counterDist * (this.counterMode ? 1 - COUNTER_HYST : 1 + COUNTER_HYST);
+    this.counterMode = dist > thr;
     this.pxKm = (dist * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / screenH;
     (this.counterMat.uniforms.uScreen.value as THREE.Vector2).set(screenW, screenH);
     (this.barMat.uniforms.uScreen.value as THREE.Vector2).set(screenW, screenH);
@@ -1059,7 +1059,7 @@ export class UnitRenderer {
         // Flughöhe in Nahansicht stauchen, damit Luftfahrzeuge im Bild bleiben
         const alt = Math.max(0, u.y - ground);
         uy = ground + Math.min(alt, 0.15 * dist + 0.03);
-        if (u.airborne && u.type.category !== 'jet') uy += Math.sin(timeSec * 1.7 + u.id) * 0.004 * s;
+        if (u.airborne && u.type.category !== 'jet') uy += Math.sin(timeSec * 1.7 + u.id) * 0.004 * SCALE.units;
       }
       const radius = this.counterMode ? COUNTER_PX * this.pxKm : def ? this.unitRadius(def, u.type.memberCount) : 0.1;
       _sphere.center.set(u.x, uy, u.z);
@@ -1078,7 +1078,7 @@ export class UnitRenderer {
         this.counterSel[nCounters] = u.selected ? 1 : 0;
         nCounters++;
       } else if (def) {
-        this.drawUnit(u, def, uy, s, dt, smooth, timeSec);
+        this.drawUnit(u, def, uy, dt, smooth, timeSec);
       }
 
       if (u.selected) {
@@ -1155,15 +1155,21 @@ export class UnitRenderer {
 
   private unitRadius(def: ModelDef, members: number): number {
     const sp = this.memberSpacing(def);
-    return this.visScale * 0.001 * (def.size * def.boost * 0.6 + sp * Math.sqrt(members) * 0.9);
+    return 0.001 * (def.size * this.modelScale(def) * 0.6 + sp * Math.sqrt(members) * 0.9);
   }
 
+  /** fester Modellmaßstab (Modellmeter -> Darstellungsmeter), siehe SCALE */
+  private modelScale(def: ModelDef): number {
+    return unitModelScale(def.boost, def.anim === 'soldier');
+  }
+
+  /** Verbandsabstand in Darstellungsmetern (Layout-Offsets sind bereits skaliert) */
   private memberSpacing(def: ModelDef): number {
-    return Math.max(def.size * def.boost * 1.7, 2.5);
+    return Math.max(def.size * this.modelScale(def) * 1.7, 2.5 * SCALE.units * 0.6);
   }
 
   /** Mitglieder eines Verbands in die Instanzpuffer schreiben */
-  private drawUnit(u: Unit, def: ModelDef, uy: number, s: number, dt: number, smooth: number, time: number): void {
+  private drawUnit(u: Unit, def: ModelDef, uy: number, dt: number, smooth: number, time: number): void {
     // Phase 3: besetzte Gebäude -> unsichtbar
     if (u.garrisonId) return;
     const slot = this.slots.get(this.slotKey(u))!;
@@ -1241,9 +1247,10 @@ export class UnitRenderer {
     // --- Neigung (Hang) / Querlage (Kurvenflug)
     const h = u.heading;
     const sh = Math.sin(h), ch = Math.cos(h);
-    const ws = s * 0.001; // m -> km inkl. Sichtmaßstab
+    const ws = 0.001; // Darstellungsmeter -> km (Layout-Offsets sind bereits skaliert)
+    const ms = this.modelScale(def);
     if (def.tilt && domain === 'ground') {
-      const half = Math.max(def.size * def.boost * ws * 0.5, 0.01);
+      const half = Math.max(def.size * ms * ws * 0.5, 0.01);
       const hf = Math.max(0, this.geo.heightAt(u.x + sh * half, u.z - ch * half)) * this.exag;
       const hb = Math.max(0, this.geo.heightAt(u.x - sh * half, u.z + ch * half)) * this.exag;
       const target = clamp(Math.atan2(hf - hb, 2 * half), -0.35, 0.35);
@@ -1262,7 +1269,7 @@ export class UnitRenderer {
     const camo = def.livery === 'air' ? col.air : def.livery === 'naval' ? col.naval : def.livery === 'heli' ? col.heli : col.ground;
     const ic = slot.mesh.instanceColor!.array as Float32Array;
     const tc = slot.team.array as Float32Array;
-    const scale = ws * def.boost;
+    const scale = ws * ms;
     const isGround = domain === 'ground';
     // Phase 3: Haltung (Soldaten): stehen / kauern (~0.65 Höhe, vorgebeugt) / liegen (flach, nach vorn gekippt).
     // Bewegte Einheiten stehen immer (außer festgenagelt/Sprung).
@@ -1278,13 +1285,13 @@ export class UnitRenderer {
     const sz = pz > 1 ? 1 + (pz - 1) * 0.15 : 1; // liegend etwas gestreckt
     // Vault: kleiner Hüpfer (0.6 s)
     const vt = u.vaultT ?? 0;
-    const hop = vt > 0 ? Math.sin(Math.PI * (1 - vt / 0.6)) * 0.9 * ws : 0;
+    const hop = vt > 0 ? Math.sin(Math.PI * (1 - vt / 0.6)) * 0.9 * ws * ms : 0;
     // In Deckung (stehend) schauen die Soldaten zur Bedrohung (= Schutzrichtung der Deckung)
     const coverYaw = coverLine && !moving ? Math.atan2(cdx, -cdz) : NaN;
     const airborne = !!u.airborne;
     // --- Fahrzeug-Animation (Turm/Rohr/Rückstoß/Laufwerk, siehe vehPrep)
-    const vv = slot.va && def.vanim ? this.vehPrep(u, v, def, dt, ws * def.boost, nAll, time) : null;
-    const wobP = vv ? vv.wobP : 0, wobR = vv ? vv.wobR : 0, bobY = vv ? vv.bobY * ws * def.boost : 0;
+    const vv = slot.va && def.vanim ? this.vehPrep(u, v, def, dt, ws * ms, nAll, time) : null;
+    const wobP = vv ? vv.wobP : 0, wobR = vv ? vv.wobR : 0, bobY = vv ? vv.bobY * ws * ms : 0;
     // --- Animationszustand für das Anim-Material (Soldaten: Gehen/Anschlag; Luft/See: Fahrwerk, Geschützdrehung)
     const an = slot.anim ? (slot.anim.array as Float32Array) : null;
     const animSoldier = def.anim === 'soldier';

@@ -13,8 +13,9 @@
 import * as THREE from 'three';
 import type { GeoData } from '../world/GeoData';
 import { terrainHeightKm } from '../world/Cities';
+import { SCALE } from '../core/scale';
 import {
-  HALF_WIDTH_M, SCALE_GLSL, SCALE_K, SCALE_MAX, TILE_KM, getRoadUniforms, ihash, stationAtOrAfter, stationAtOrBefore,
+  HALF_WIDTH_M, SCALE_GLSL, ROAD_WIDTH_SCALE, TILE_KM, getRoadUniforms, ihash, stationAtOrAfter, stationAtOrBefore,
   type Crossing, type RestStop, type RoadNet,
 } from './RoadGeometry';
 
@@ -368,8 +369,8 @@ function makePropMaterial(maxD: number, shared: Record<string, THREE.IUniform>, 
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, shared);
     sh.uniforms.uMaxD = { value: maxD };
-    sh.uniforms.uKP = { value: roadScaled ? SCALE_K : PROP_K };
-    sh.uniforms.uPMax = { value: roadScaled ? SCALE_MAX : PROP_MAX };
+    sh.uniforms.uKP = { value: 0 };
+    sh.uniforms.uPMax = { value: roadScaled ? ROAD_WIDTH_SCALE : PROP_SCALE };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\n' + PROP_PARS)
       .replace(
@@ -383,7 +384,7 @@ function makePropMaterial(maxD: number, shared: Record<string, THREE.IUniform>, 
         float pcy = cos(pyaw), psy = sin(pyaw);
         vec3 pip = vec3(aI0.x, aI1.w * uExag, aI0.y);
         float pd = max(1.0, distance(cameraPosition, pip));
-        float pS = clamp(pd * uKP, 1.0, uPMax) * aI0.w * step(pd, uMaxD);
+        float pS = uPMax * aI0.w * step(pd, uMaxD);
         vec2 pbase = aI0.xy + aI1.xy * roadScale(pd);
         float pg = groundKm(pbase) * uExag;
         vec3 ploc = transformed * pS;
@@ -414,7 +415,7 @@ void main() {
   float gA0 = groundKm(A) * uExag;
   float d = max(1.0, distance(cameraPosition, vec3(A.x, gA0, A.y)));
   float S = roadScale(d);
-  float SP = clamp(d * uKP, 1.0, uPMax) * 1.25;
+  float SP = uPMax * 1.25;
   vec2 pa = A + aP.yz * S, pb = B + aP.yz * S;
   float ya = groundKm(pa) * uExag, yb = groundKm(pb) * uExag;
   float t = aP.x;
@@ -446,9 +447,8 @@ export interface PropTile {
   instances: number;
 }
 
-/** Prop-Maßstab: Faktor je km Kameraabstand (größer als beim Straßenband, Props sind sonst Haarlinien) */
-const PROP_K = 1.7;
-const PROP_MAX = 26;
+/** Prop-Maßstab: fester Faktor (SCALE.props), kein Wachsen mit dem Kameraabstand; Ausblenden über MAX_D */
+const PROP_SCALE = SCALE.roadProps;
 const FLOATS = 8;
 const TILE_INSTANCE_CAP = 9000;
 
@@ -484,7 +484,7 @@ export class RoadProps {
 
   private mat(kind: PropKind): THREE.MeshLambertMaterial {
     let m = this.mats.get(kind);
-    if (!m) this.mats.set(kind, (m = makePropMaterial(MAX_D[kind], this.uniforms, kind === 'gantry' || kind === 'crossBarrier' || kind === 'jersey')));
+    if (!m) this.mats.set(kind, (m = makePropMaterial(MAX_D[kind], this.uniforms, kind === 'gantry' || kind === 'crossBarrier' || kind === 'jersey' || kind === 'truck' || kind === 'van' || kind === 'car')));
     return m;
   }
 
@@ -493,7 +493,7 @@ export class RoadProps {
       vertexShader: WIRE_VERT,
       fragmentShader: WIRE_FRAG,
       fog: true,
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uColor: { value: new THREE.Color(color) }, uMaxD: { value: maxD }, uKP: { value: PROP_K }, uPMax: { value: PROP_MAX } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uColor: { value: new THREE.Color(color) }, uMaxD: { value: maxD }, uKP: { value: 0 }, uPMax: { value: PROP_SCALE } }]),
     });
     Object.assign(m.uniforms, this.uniforms);
     this.wireMats.push(m);

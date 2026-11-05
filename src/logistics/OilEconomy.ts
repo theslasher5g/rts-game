@@ -101,6 +101,8 @@ export class OilEconomy {
   readonly object: THREE.Object3D;
   /** Zeit seit Spielbeginn in Spielstunden */
   time = 0;
+  /** Mehrspieler (Gast): Spiegel – update() zeichnet nur noch; Felder/Basen/Konvois/Pools schreibt GuestSync in place */
+  mirror = false;
 
   private readonly geo: GeoData;
   private readonly units: UnitManager;
@@ -139,11 +141,12 @@ export class OilEconomy {
     this.layer = new SiteLayer(deps.geo, this.exag, 'EconomySites');
     this.object = this.layer.object;
     this.offs.push(
-      bus.on('unit:killed', (e) => this.onKilled(e.id, e.killerId)),
-      bus.on('unit:removed', ({ id }) => this.onRemoved(id)),
+      bus.on('unit:killed', (e) => { if (!this.mirror) this.onKilled(e.id, e.killerId); }),
+      bus.on('unit:removed', ({ id }) => { if (!this.mirror) this.onRemoved(id); }),
       bus.on('nav:edge', () => { for (const fr of this.frt.values()) fr.cutCheckAt = Math.min(fr.cutCheckAt, this.time); }),
-      bus.on('combat:impact', (e) => this.onImpact(e.weapon, e.x, e.z, e.radiusKm)),
+      bus.on('combat:impact', (e) => { if (!this.mirror) this.onImpact(e.weapon, e.x, e.z, e.radiusKm); }),
       bus.on('combat:explosion', (e) => {
+        if (this.mirror) return;
         const d = EXPLOSION_DMG[e.size] ?? 0;
         if (d > 0) this.onImpact('howitzer', e.x, e.z, 0.02, d / (IMPACT_DMG.howitzer ?? 55));
       }),
@@ -828,7 +831,20 @@ export class OilEconomy {
 
   // ------------------------------------------------------------------ Update
 
+  /** Gast: Basis aus dem Spiegel entfernen (inkl. Darstellung) */
+  removeBaseRemote(id: number): void {
+    this.bases.delete(id);
+    this.layer.remove(`b${id}`);
+    this.visDirty = true;
+  }
+
   update(dtGameHours: number, realDt: number): void {
+    if (this.mirror) {
+      this.visClock += realDt;
+      if (this.visClock >= 0.25 || this.visDirty) { this.visClock = 0; this.syncVisuals(); }
+      this.layer.animate(realDt);
+      return;
+    }
     const dt = dtGameHours > 0 ? dtGameHours : 0;
     if (dt > 0) {
       this.time += dt;

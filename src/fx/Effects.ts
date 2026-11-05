@@ -9,8 +9,8 @@
  *  - Wracks (InstancedMesh je Kategorie, verbrannt, qualmen/brennen ~60 s)
  *  - Rauch-Wolkenregister (SmokeQuery) für die Sichtlinienprüfung
  *
- * Größen werden in "Metern" simuliert und beim Rendern mit dem strategischen Sichtmaßstab
- * (wie UnitRenderer: clamp(4 · Kameraabstand, 3, 600)) in Welt-km umgerechnet, damit Effekte beim Herauszoomen lesbar bleiben.
+ * Größen werden in "Metern" simuliert und beim Rendern mit dem festen Effektmaßstab SCALE.effects in Welt-km
+ * umgerechnet (kein Wachsen mit dem Kameraabstand; der Partikel-Shader hält nur eine Mindest-Pixelgröße).
  */
 import * as THREE from 'three';
 import { bus } from '../core/EventBus';
@@ -19,14 +19,14 @@ import type { ExplosionSize, ImpactSurface, SmokeQuery, WeaponKind } from '../co
 import type { Unit } from '../units/types';
 import type { GeoData } from '../world/GeoData';
 import { terrainHeightKm } from '../world/Cities';
+import { SCALE } from '../core/scale';
 import { SUN_DIR } from '../world/Terrain';
 import { CraterLayer } from './craters';
 import { DECAL_FRAG, DECAL_VERT, PARTICLE_FRAG, PARTICLE_VERT, RIBBON_FRAG, RIBBON_VERT } from './shaders';
 
 // ---------------------------------------------------------------- Tuning
-const VIS_K = 4;
-const VIS_MIN = 3;
-const VIS_MAX = 600;
+/** fester Effektmaßstab (siehe core/scale.ts) – kein Wachsen mit dem Kameraabstand */
+const FX_SCALE = SCALE.effects;
 /** Standard-Skalierungsexponent der Effekte: Größe(m) · 0.001 · visScale^EFFECT_SC (etwas schwächer als die Einheiten, damit Explosionen nicht den Bildschirm füllen) */
 const EFFECT_SC = 0.85;
 const PARTICLE_CAP = 24000;
@@ -136,7 +136,7 @@ class Particles {
     this.material = new THREE.ShaderMaterial({
       vertexShader: PARTICLE_VERT,
       fragmentShader: PARTICLE_FRAG,
-      uniforms: { uVis: { value: VIS_MIN }, uPx: { value: 0.002 } },
+      uniforms: { uVis: { value: FX_SCALE }, uPx: { value: 0.002 } },
       transparent: true,
       depthWrite: false,
       depthTest: true,
@@ -724,7 +724,7 @@ export class Effects {
   private exag: number;
   private clock = 0;
   private camDist = 100;
-  private visScale = VIS_MIN;
+  private visScale = FX_SCALE;
   private lift = 0.002;
   private readonly camPos = new THREE.Vector3();
   private readonly camDir = new THREE.Vector3();
@@ -748,7 +748,7 @@ export class Effects {
   private readonly rings: DecalLayer;
   private readonly ribbons = new RibbonLayer();
   private readonly decalUniforms: Record<string, THREE.IUniform> = {
-    uVis: { value: VIS_MIN },
+    uVis: { value: FX_SCALE },
     uTime: { value: 0 },
     uLift: { value: 0.002 },
     uBowl: { value: 0 },
@@ -1194,9 +1194,9 @@ export class Effects {
     // Tracer (Kleinwaffen + Kanonen)
     if (w.tracer > 0 && dist > 1e-5) {
       const travel = flight > 0.01 ? Math.min(flight, 1.2) : clamp(dist / 2.2, 0.05, 0.4);
-      const lenFrac = clamp((0.012 * this.visScale) / dist, 0.05, 0.45);
+      const lenFrac = clamp((0.012 * SCALE.units) / dist, 0.05, 0.45);
       const tr = e.weapon === 'tank_gun' || e.weapon === 'naval_gun' ? 1 : 1;
-      this.ribbons.add(e.fx, e.fy + 0.0008 * this.visScale, e.fz, e.tx, e.ty, e.tz, this.clock, travel, lenFrac, tr, 0.78, 0.3, w.tracer);
+      this.ribbons.add(e.fx, e.fy + 0.0008 * SCALE.units, e.fz, e.tx, e.ty, e.tz, this.clock, travel, lenFrac, tr, 0.78, 0.3, w.tracer);
     }
 
     // Projektile mit Eigenleben (Rakete, ballistisch, Bombe, Torpedo)
@@ -1207,7 +1207,7 @@ export class Effects {
     } else if (w.proj === 1 && dist > 1e-5) {
       // schneller Schuss: dicker Tracer
       const travel = clamp(dist / 3.5, 0.05, 0.3);
-      this.ribbons.add(e.fx, e.fy + 0.0008 * this.visScale, e.fz, e.tx, e.ty, e.tz, this.clock, travel, clamp((0.02 * this.visScale) / dist, 0.06, 0.5), 1, 0.85, 0.45, 3.5);
+      this.ribbons.add(e.fx, e.fy + 0.0008 * SCALE.units, e.fz, e.tx, e.ty, e.tz, this.clock, travel, clamp((0.02 * SCALE.units) / dist, 0.06, 0.5), 1, 0.85, 0.45, 3.5);
     }
   }
 
@@ -1563,9 +1563,10 @@ export class Effects {
   }
 
   private updateWrecks(): void {
-    if (Math.abs(this.visScale - this.lastWreckScale) < this.lastWreckScale * 0.004 && this.lastWreckScale > 0) return;
-    this.lastWreckScale = this.visScale;
-    const ws = this.visScale * 0.001;
+    // Wracks haben festen Maßstab (wie die Einheiten); nur der Anti-Z-Fight-Hub folgt dem Kameraabstand
+    if (Math.abs(this.camDist - this.lastWreckScale) < this.lastWreckScale * 0.05 && this.lastWreckScale > 0) return;
+    this.lastWreckScale = this.camDist;
+    const ws = SCALE.units * 0.001;
     const lift = this.camDist * 0.0012;
     for (const [kind, mesh] of this.wreckMeshes) {
       const n = this.wreckCount.get(kind)!;
@@ -1710,7 +1711,7 @@ export class Effects {
     this.focusX = this.camPos.x + this.camDir.x * dist;
     this.focusZ = this.camPos.z + this.camDir.z * dist;
     this.shake.setView(this.focusX, this.focusZ, dist);
-    this.visScale = clamp(VIS_K * dist, VIS_MIN, VIS_MAX);
+    this.visScale = FX_SCALE;
     this.lift = dist * 0.003 + 0.002;
     this.projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projView);

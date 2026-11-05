@@ -15,6 +15,7 @@ import { FogOfWar } from './fog/FogOfWar';
 import type { GameContext } from './game/context';
 import { MissionSystem, Tutorial, nextMissionId, resolveMission } from './game/missions';
 import { EndScreen } from './ui/EndScreen';
+import { ProtectBanner } from './ui/ProtectBanner';
 import { MissionPanel } from './ui/MissionPanel';
 import { TutorialOverlay } from './ui/TutorialOverlay';
 import { EconomyAI } from './logistics/EconomyAI';
@@ -158,6 +159,24 @@ async function boot() {
   const endScreen = new EndScreen(uiRoot, missions);
   const tutorial = new Tutorial({ ctx, getCameraDistance: () => rts.distance, getSelectedIds: () => ctl.selectedUnits().map((u) => u.id) });
   const tutorialOverlay = new TutorialOverlay(uiRoot, tutorial);
+  const protectBanner = new ProtectBanner(uiRoot, state);
+  // Grenzschutz: Gebiet von Verbündeten ist für eigene Einheiten offen
+  units.borderFriendly = (owner, a3) => !!getProfile(owner)?.allies.includes(a3) || !!getProfile(a3)?.allies.includes(owner);
+  let protectActive = false;
+  const syncProtection = () => {
+    const on = state.borderProtectSec > 0 && !!state.playerA3;
+    if (on === protectActive) return;
+    protectActive = on;
+    war.ceasefire = on;
+    units.borderClosed = on;
+    combat.invalidateHostility();
+    if (!on && state.playerA3) {
+      // Schutz beendet: Kriegszustand neu bekannt machen (Caches von KI, Kampf, Ansehen) und melden
+      for (const [a, b] of war.listPairs()) bus.emit('war:declared', { a, b });
+      bus.emit('alert', { a3: state.playerA3, kind: 'danger', text: 'Grenzschutz beendet – die Grenzen sind offen, der Krieg beginnt' });
+      bus.emit('toast', { msg: 'Grenzschutz beendet – der Krieg beginnt', kind: 'warn' });
+    }
+  };
   const ais: AICommander[] = [];
   let aiHeld = false;
   endScreen.onAction = (a) => {
@@ -245,6 +264,9 @@ async function boot() {
       ais.push(new AICommander(ctx, { a3: p.a3, difficulty: def.ai.difficulty, style: war.isHostile(p.a3, countryA3) ? 'aggressor' : 'defender', econ: econAI }));
     }
     aiHeld = false;
+    // Grenzschutz: 10 Minuten Echtzeit im freien Gefecht (Kampagne: Zeitplan der Mission gilt)
+    state.borderProtectSec = def.id === 'skirmish' ? 600 : 0;
+    syncProtection();
     if (missions.wantsTutorial) tutorial.start();
     const hq = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3)?.hq;
     if (hq) rts.focus(hq[0], hq[1], 80);
@@ -299,6 +321,8 @@ async function boot() {
     rts.update(dt);
     updateHover();
     state.update(dt);
+    syncProtection();
+    protectBanner.update();
     units.update(state.lastHours);
     const gameSec = state.lastHours * 3600;
     // Der Kampf rechnet je Frame höchstens 3 Spielsekunden: genau diese Rate muss die Effekt-Darstellung kennen

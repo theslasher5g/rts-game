@@ -38,7 +38,7 @@ float h21(vec2 p) {
 }
 void main() {
   float K = 0.001 * pow(uVis, 0.85);
-  float R = aG.z * K * 1.7; // Krater etwas überhöht, damit sie im Strategiemaßstab lesbar bleiben
+  float R = aG.z * K * 1.2; // Krater leicht überhöht (fester Maßstab, siehe SCALE.effects)
   float r0 = position.x;
   float th = position.y;
   float seg = position.z;

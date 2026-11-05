@@ -81,4 +81,4 @@ export function mpDiplomacy(mode: MpMode): { alliances: Array<[string, string]>;
  * Siehe src/logistics/types.ts.
  */
 export const OIL_START_BARRELS = 600;
-export const OIL_FIELDS_PER_MAP = 9;
+export const OIL_FIELDS_PER_MAP = 12;

@@ -380,6 +380,8 @@ const MAX_INSTANCES = 120000;
 export class StructureManager {
   readonly object = new THREE.Group();
   structures = new Map<number, StructureInfo>();
+  /** Mehrspieler (Gast): Spiegel – kein Baufortschritt/Minen/Brückenjobs; Bauwerke kommen per addRemote/updateRemote/removeRemote */
+  mirror = false;
 
   private readonly geo: GeoData;
   private readonly units: UnitManager;
@@ -440,9 +442,53 @@ export class StructureManager {
     this.symbols.visible = false;
     this.object.add(this.symbols);
 
-    bus.on('building:destroyed', ({ id }) => this.onBuildingDestroyed(id));
-    bus.on('unit:removed', ({ id }) => this.dropUnit(id));
-    bus.on('unit:killed', ({ id }) => this.dropUnit(id));
+    bus.on('building:destroyed', ({ id }) => { if (!this.mirror) this.onBuildingDestroyed(id); });
+    bus.on('unit:removed', ({ id }) => { if (!this.mirror) this.dropUnit(id); });
+    bus.on('unit:killed', ({ id }) => { if (!this.mirror) this.dropUnit(id); });
+  }
+
+  // ================================================================== Mehrspieler
+
+  /** Host: Zusatzdaten eines Bauwerks für den Schnappschuss (Blickrichtung der Teile, Straßenkante) */
+  exportRemote(id: number): { fx: number; fz: number; edgeId: number } | null {
+    const r = this.recs.get(id);
+    return r ? { fx: r.fx, fz: r.fz, edgeId: r.edgeId } : null;
+  }
+
+  /** Gast: Bauwerk aus dem Host-Schnappschuss anlegen (erzeugt dieselben Darstellungsteile wie der Host) */
+  addRemote(info: StructureInfo, fx: number, fz: number, edgeId: number): void {
+    if (this.recs.has(info.id)) return;
+    const def = STRUCTURE_DEFS[info.kind];
+    if (!def) return;
+    const pts = info.points.slice();
+    const length = def.line ? polylineLength(pts) : 0;
+    const pb = generatePieces(this.geo, info.kind, pts, fx, fz, info.id);
+    const mid = pointAlong(pts, length / 2);
+    const own: StructureInfo = { id: info.id, kind: info.kind, owner: info.owner, points: pts, progress: info.progress, hp: info.hp, hpMax: info.hpMax };
+    const rec: Rec = { info: own, def, pts, length, pieces: Float32Array.from(pb.data), nPieces: pb.count, fx, fz, cover: [], edgeId, cx: def.line ? mid.x : pts[0], cz: def.line ? mid.z : pts[1], completed: own.progress >= 1 };
+    this.recs.set(info.id, rec);
+    this.structures.set(info.id, own);
+    this.viewDirty = true;
+    this.symbolsDirty = true;
+  }
+
+  /** Gast: Fortschritt/Zustand eines Bauwerks nachführen */
+  updateRemote(id: number, progress: number, hp: number, hpMax: number): void {
+    const r = this.recs.get(id);
+    if (!r) return;
+    if (r.info.progress !== progress || r.info.hp !== hp) this.viewDirty = true;
+    r.info.progress = progress;
+    r.info.hp = hp;
+    r.info.hpMax = hpMax;
+    r.completed = progress >= 1;
+  }
+
+  /** Gast: Bauwerk entfernen (ohne Effekte, ohne Ereignisse) */
+  removeRemote(id: number): void {
+    if (!this.recs.delete(id)) return;
+    this.structures.delete(id);
+    this.viewDirty = true;
+    this.symbolsDirty = true;
   }
 
   /** Kriegsstatus für Minenfelder (ohne: jede fremde Einheit ist Feind). */
@@ -892,6 +938,10 @@ export class StructureManager {
 
   update(dtGameHours: number, realDt: number): void {
     this.clock += realDt;
+    if (this.mirror) {
+      this.viewTimer += realDt;
+      return;
+    }
     this.updateBuildJobs(dtGameHours);
     this.updateBridgeJobs(dtGameHours);
     this.updateGarrison();

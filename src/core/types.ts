@@ -138,7 +138,7 @@ export interface GameEvents {
   'country:select': { id: number };
   'settings:changed': { settings: Settings };
   'camera:focus': { x: number; z: number; distance?: number };
-  'game:start': { countryA3: string; /** Phase 6: Kampagnenmission (id aus game/missions/campaign.ts); fehlt = freies Spiel */ missionId?: string };
+  'game:start': { countryA3: string; /** Phase 6: Kampagnenmission (id aus game/missions/campaign.ts); fehlt = freies Spiel */ missionId?: string; /** Phase 7: Mehrspieler-Start */ mp?: { mode: 'teams' | 'ffa'; players: Array<{ id: string; name: string; a3: string }>; selfId: string; role: 'host' | 'guest'; seed: number } };
   // Phase 2
   /** Auswahl hat sich geändert (Unit-IDs) */
   'units:selection': { ids: number[] };

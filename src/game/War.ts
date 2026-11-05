@@ -12,8 +12,21 @@ export class War implements WarQuery {
     return a < b ? `${a}|${b}` : `${b}|${a}`;
   }
 
+  /** Waffenstillstand (Grenzschutz zu Spielbeginn): solange er gilt, ist niemand feindlich – es wird nicht gekämpft. */
+  ceasefire = false;
+
   isHostile(a: string, b: string): boolean {
-    return a !== b && this.pairs.has(this.key(a, b));
+    return !this.ceasefire && a !== b && this.pairs.has(this.key(a, b));
+  }
+
+  /** Alle Kriegspaare (a3, a3), unabhängig vom Waffenstillstand */
+  listPairs(): Array<[string, string]> {
+    const out: Array<[string, string]> = [];
+    for (const k of this.pairs) {
+      const [x, y] = k.split('|');
+      out.push([x, y]);
+    }
+    return out;
   }
 
   declare(a: string, b: string): void {

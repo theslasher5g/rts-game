@@ -539,7 +539,7 @@ export function buildDroneQuad(): ModelDef {
   return {
     geom: b.build({ groundAO: 0 }),
     size: 0.5,
-    boost: 7,
+    boost: 2.5,
     rotors: [[0.18, 0.15, 0.18, 0.1], [-0.18, 0.15, 0.18, 0.1], [0.18, 0.15, -0.18, 0.1], [-0.18, 0.15, -0.18, 0.1]],
     livery: 'air',
     tilt: false,

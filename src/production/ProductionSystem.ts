@@ -36,6 +36,8 @@ export interface CatalogEntry {
 
 export class ProductionSystem {
   readonly orders = new Map<number, ProductionOrderInfo>();
+  /** Mehrspieler (Gast): Spiegel – keine Auftragsabarbeitung; `orders` schreibt GuestSync in place */
+  mirror = false;
   readonly object: THREE.Object3D;
 
   private readonly geo: GeoData;
@@ -199,7 +201,7 @@ export class ProductionSystem {
 
   update(dtGameHours: number, realDt = 1 / 60): void {
     const dt = dtGameHours > 0 ? dtGameHours : 0;
-    if (dt > 0 && this.orders.size > 0) {
+    if (!this.mirror && dt > 0 && this.orders.size > 0) {
       const byBase = new Map<number, ProductionOrderInfo[]>();
       for (const o of this.orders.values()) {
         const a = byBase.get(o.baseId);

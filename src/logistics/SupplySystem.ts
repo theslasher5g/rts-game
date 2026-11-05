@@ -149,10 +149,13 @@ export class SupplySystem {
 
   // ------------------------------------------------------------------ Update
 
+  /** Mehrspieler (Gast): Spiegel – keine Nachschub-Simulation (nur Statistik für die Anzeige) */
+  mirror = false;
+
   update(dtGameHours: number, realDt: number): void {
     this.clock += realDt;
     this.statClock += realDt;
-    const dt = dtGameHours > 0 ? dtGameHours : 0;
+    const dt = dtGameHours > 0 && !this.mirror ? dtGameHours : 0;
     if (dt > 0) {
       this.time += dt;
       this.depotRefill(dt);

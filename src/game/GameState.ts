@@ -85,8 +85,15 @@ export class GameState {
   /** Im letzten update() vergangene Spielstunden (0 bei Pause / im Menü) – für Einheiten-Simulation. */
   lastHours = 0;
 
+  /**
+   * Grenzschutz: verbleibende ECHTZEIT-Sekunden (nur bei laufender Zeit), in denen niemand die Grenze überschreiten darf und
+   * nicht gekämpft wird. 0 = kein Schutz. Wird von main.ts beim Spielstart gesetzt (Skirmish und Mehrspieler: 600 s).
+   */
+  borderProtectSec = 0;
+
   update(dt: number): void {
     this.lastHours = 0;
+    if (this.playerA3 && this.speed > 0 && this.borderProtectSec > 0) this.borderProtectSec = Math.max(0, this.borderProtectSec - dt);
     if (!this.playerA3 || this.speed <= 0) return;
     const hours = dt * (SPEED_HOURS_PER_SEC[Math.min(5, Math.max(0, Math.round(this.speed)))] ?? 0);
     if (hours <= 0) return;

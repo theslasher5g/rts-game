@@ -25,7 +25,7 @@ const crop = argOf('--crop', `0,0,${W * CELL},${H * CELL}`).split(',').map(Numbe
 const [cx0, cz0, cw, chh] = crop;
 const OW = Math.round((cw / CELL) * SC), OH = Math.round((chh / CELL) * SC);
 const rgb = new Uint8Array(OW * OH * 3);
-const NATCOL = [[0, 0, 0], [79, 127, 191], [191, 79, 79], [95, 168, 106]];
+const NATCOL = [[0, 0, 0], [79, 127, 191], [191, 79, 79], [95, 168, 106], [211, 161, 60], [150, 150, 150], [150, 100, 150], [100, 150, 150]];
 const toX = (x) => ((x - cx0) / cw) * OW, toY = (z) => ((z - cz0) / chh) * OH;
 for (let oy = 0; oy < OH; oy++) for (let ox = 0; ox < OW; ox++) {
   const gx = Math.min(W - 1, Math.max(0, Math.floor((cx0 + (ox / OW) * cw) / CELL))), gy = Math.min(H - 1, Math.max(0, Math.floor((cz0 + (oy / OH) * chh) / CELL)));

@@ -47,11 +47,12 @@ const REGION = {
   cellKm: +grab(/cellKm:\s*([\d.]+)/, 0.25),
 };
 const NATIONS = [];
+const MP_TEAMS = [...(/MP_TEAMS[^=]*=\s*\[(\[[^\]]+\]\s*,\s*\[[^\]]+\])\]/.exec(scen)?.[1] ?? "['VAL','MAR'],['KRN','PAN']").matchAll(/'(\w+)'\s*,\s*'(\w+)'/g)].map((m) => [m[1], m[2]]);
 {
   const re = /a3:\s*'(\w+)',\s*name:\s*'([^']+)',\s*short:\s*'([^']+)',\s*color:\s*'([^']+)',\s*areaShare:\s*([\d.]+),\s*homeland:\s*'(\w+)',\s*capital:\s*'([^']+)'/g;
   let m;
   while ((m = re.exec(scen))) NATIONS.push({ a3: m[1], name: m[2], short: m[3], color: m[4], areaShare: +m[5], homeland: m[6], capital: m[7] });
-  if (NATIONS.length !== 3) throw new Error('scenario.ts: Nationen nicht lesbar');
+  if (NATIONS.length !== 4) throw new Error('scenario.ts: Nationen nicht lesbar');
 }
 // Kartenfenster leicht verschoben: mehr Adria (Kvarner) im Südwesten, Julische Alpen im Nordwesten (siehe Bericht)
 const CENTER_LON = 15.55, CENTER_LAT = 45.55;
@@ -381,6 +382,7 @@ const tpi = new Float32Array(N); { const hb = boxMean(heights, 12); for (let k =
 
 // ---------------------------------------------------------------- 3) Länder
 log('Länder…');
+const NN_ = NATIONS.length;
 const landMask = sea.map((v) => 1 - v);
 const mainLand = (() => {
   const lc = components(landMask, false);
@@ -411,7 +413,7 @@ function pickSeed(fx, fy, maxH) {
   }
   return best;
 }
-const HOME = { west: [[0.14, 0.3]], east: [[0.86, 0.42]], south: [[0.5, 0.9], [0.345, 0.74]], north: [[0.5, 0.1]], center: [[0.5, 0.5]] };
+const HOME = { west: [[0.14, 0.3]], east: [[0.9, 0.6]], south: [[0.5, 0.9], [0.345, 0.74]], north: [[0.76, 0.1]], center: [[0.5, 0.5]] };
 const seedLists = NATIONS.map((n) => HOME[n.homeland].map((h) => pickSeed(h[0], h[1], 450)));
 const seeds = seedLists.map((l) => l[0]);
 const owner = new Uint8Array(N);
@@ -439,14 +441,14 @@ function grow(weights) {
   const w = NATIONS.map(() => 1);
   for (let it = 0; it < 14; it++) {
     grow(w);
-    const cnt = [0, 0, 0, 0]; for (let k = 0; k < N; k++) cnt[owner[k]]++;
+    const cnt = new Array(NN_ + 1).fill(0); for (let k = 0; k < N; k++) cnt[owner[k]]++;
     let maxErr = 0;
     NATIONS.forEach((n, i) => {
       const share = cnt[i + 1] / landCount;
       maxErr = Math.max(maxErr, Math.abs(share - n.areaShare));
       w[i] *= Math.pow(share / n.areaShare, 0.55);
     });
-    const gm = Math.pow(w[0] * w[1] * w[2], 1 / 3); for (let i = 0; i < 3; i++) w[i] /= gm;
+    const gm = Math.pow(w.reduce((a, b) => a * b, 1), 1 / NN_); for (let i = 0; i < NN_; i++) w[i] /= gm;
     if (maxErr < 0.008) break;
   }
   grow(w);
@@ -457,21 +459,21 @@ for (let pass = 0; pass < 3; pass++) {
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
     const k = y * W + x;
     if (!mainLand[k]) continue;
-    const cnt = [0, 0, 0, 0];
+    const cnt = new Array(NN_ + 1).fill(0);
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const n = src[(y + dy) * W + x + dx]; if (n) cnt[n]++; }
-    let b = src[k]; for (let o = 1; o <= 3; o++) if (cnt[o] > cnt[b]) b = o;
+    let b = src[k]; for (let o = 1; o <= NN_; o++) if (cnt[o] > cnt[b]) b = o;
     owner[k] = b;
   }
 }
-for (let o = 1; o <= 3; o++) {
+for (let o = 1; o <= NN_; o++) {
   const m = owner.map((v) => (v === o ? 1 : 0));
   const lc = components(m, false);
   let big = 0; for (let i = 1; i < lc.sizes.length; i++) if (lc.sizes[i] > lc.sizes[big]) big = i;
   for (let k = 0; k < N; k++) {
     if (!m[k] || lc.lab[k] === big || lc.sizes[lc.lab[k]] > 6000) continue;
-    const x = k % W, y = (k / W) | 0, cnt = [0, 0, 0, 0];
+    const x = k % W, y = (k / W) | 0, cnt = new Array(NN_ + 1).fill(0);
     for (let d = 0; d < 4; d++) { const nx = x + DX[d], ny = y + DY[d]; if (nx >= 0 && ny >= 0 && nx < W && ny < H) { const v = owner[ny * W + nx]; if (v && v !== o) cnt[v]++; } }
-    let b = 0; for (let q = 1; q <= 3; q++) if (cnt[q] > cnt[b]) b = q;
+    let b = 0; for (let q = 1; q <= NN_; q++) if (cnt[q] > cnt[b]) b = q;
     if (b) owner[k] = b;
   }
 }
@@ -497,14 +499,14 @@ for (let o = 1; o <= 3; o++) {
   }
 }
 for (let k = 0; k < N; k++) if (sea[k]) owner[k] = 0;
-const nationCells = [0, 0, 0, 0]; for (let k = 0; k < N; k++) nationCells[owner[k]]++;
-let ownedLand = 0; for (let k = 1; k < 4; k++) ownedLand += nationCells[k];
+const nationCells = new Array(NN_ + 1).fill(0); for (let k = 0; k < N; k++) nationCells[owner[k]]++;
+let ownedLand = 0; for (let k = 1; k <= NN_; k++) ownedLand += nationCells[k];
 const shares = NATIONS.map((n, i) => nationCells[i + 1] / ownedLand);
 log('Flächenanteile', NATIONS.map((n, i) => `${n.a3} ${(shares[i] * 100).toFixed(1)}%`).join(' '));
 
 // Distanz zu fremdem Gebiet (Grenzabstand) je Nation
 const borderDist = [null];
-for (let o = 1; o <= 3; o++) {
+for (let o = 1; o <= NN_; o++) {
   const m = new Uint8Array(N);
   for (let k = 0; k < N; k++) if (!sea[k] && owner[k] !== o) m[k] = 1; // fremdes Land (Meer zählt nicht als Grenze)
   borderDist.push(distKm(m));
@@ -522,6 +524,7 @@ const usedNames = new Set(NATIONS.map((n) => n.capital));
 const FLAVOUR = {
   west: { stems: ['Val', 'Bre', 'Cor', 'Tol', 'Vel', 'Gra', 'Lju', 'Mor', 'Pol', 'Sta', 'Tri', 'Kra', 'Bov', 'Cel', 'Dra', 'Pre', 'Zel', 'Ora', 'Sev', 'Rav'], mids: ['', '', 'ni', 'vi', 'ko', 'la', 'ri', 'ba'], ends: ['ica', 'ovo', 'ec', 'ano', 'ino', 'je', 'burg', 'enza', 'jan', 'ik', 'ava', 'ona'] },
   east: { stems: ['Stein', 'Ost', 'Hohen', 'Wald', 'Grün', 'Rau', 'Eis', 'Lind', 'Berg', 'Drau', 'Mark', 'Fels', 'Neu', 'Kron', 'Bad', 'Nord', 'Alt', 'Rot'], mids: ['', '', '', 'en', 'er'], ends: ['dorf', 'burg', 'stadt', 'au', 'heim', 'furt', 'bach', 'itz', 'brück', 'ow', 'kirchen', 'hof'] },
+  north: { stems: ['Szent', 'Nagy', 'Kis', 'Kecs', 'Deb', 'Győr', 'Pécs', 'Mis', 'Vesz', 'Tat', 'Eger', 'Szek', 'Zala', 'Bala', 'Kapos', 'Sop', 'Hód', 'Baj', 'Szol', 'Ráb'], mids: ['', '', 'a', 'e', 'o', 'ka'], ends: ['vár', 'falva', 'háza', 'hely', 'kút', 'ód', 'ány', 'esd', 'árd', 'szeg', 'laka', 'kert', 'pest', 'tó'] },
   south: { stems: ['Mar', 'Sol', 'Cal', 'Pia', 'Por', 'Ven', 'Ros', 'Lid', 'Tor', 'Bel', 'Cas', 'Mon', 'Sal', 'Vil', 'Cor', 'Ser', 'Lav'], mids: ['', 'e', 'a', 'o', 'ar'], ends: ['ena', 'ora', 'ino', 'etta', 'ago', 'ia', 'one', 'ara', 'ello', 'ona', 'eto', 'ola', 'azzo'] },
 };
 const flavourOf = (n) => FLAVOUR[n.homeland] ?? FLAVOUR.west;
@@ -554,7 +557,7 @@ NATIONS.forEach((n, ni) => {
   cities.push({ name: n.capital, nat: ni, pop: 0, capital: true, cell: best, port: false });
 });
 // Weitere Städte
-const CITY_COUNT = [6, 6, 4];
+const CITY_COUNT = [6, 6, 5, 5];
 const coastCells = NATIONS.map((n, ni) => { let c = 0; for (let k = 0; k < N; k += 3) if (owner[k] === ni + 1 && seaDist[k] < 2.5) c++; return c; });
 const portsWanted = NATIONS.map((n, ni) => (coastCells[ni] > 800 ? 2 : coastCells[ni] > 150 ? 1 : 0));
 function citySpots(ni, port) {
@@ -601,55 +604,100 @@ NATIONS.forEach((n, ni) => {
   const rest = mine.filter((c) => !c.capital).sort((a, b) => 0 + (rnd() - 0.5));
   rest.forEach((c, i) => { c.pop = Math.max(15000, Math.round((cap.pop * Math.pow(i + 2, -1.55) * (0.55 + rnd() * 0.9)) / 1000) * 1000); });
 });
-if (cities.length < 14 || cities.length > 18) log(`WARNUNG: ${cities.length} Städte`);
+{
+  // Team-Bilanz: Einwohner je Team (MP_TEAMS) auf +-4 % angleichen (kleineres Team skaliert hoch)
+  const teamOf = (ni) => MP_TEAMS.findIndex((t) => t.includes(NATIONS[ni].a3));
+  const tot = [0, 0]; cities.forEach((c) => { tot[teamOf(c.nat)] += c.pop; });
+  const lo = tot[0] < tot[1] ? 0 : 1, f = tot[1 - lo] / tot[lo];
+  if (f > 1.04) cities.forEach((c) => { if (teamOf(c.nat) === lo) c.pop = Math.round((c.pop * (1 + (f - 1) * 0.98)) / 1000) * 1000; });
+}
+if (cities.length < 20 || cities.length > 23) log(`WARNUNG: ${cities.length} Städte`);
 
-// Ölfelder
+// HQ / Raffinerie / Spawn je Nation
+const capCityIdx = NATIONS.map((n, ni) => cities.findIndex((c) => c.nat === ni && c.capital));
+const startPos = NATIONS.map((n, ni) => {
+  const cap = cities[capCityIdx[ni]];
+  const enemies = NATIONS.map((_, i) => i).filter((i) => i !== ni);
+  // Front: Richtung zur nächsten feindlichen Hauptstadt (Krieg laut Szenario), sonst nächste
+  const foes = enemies.filter((i) => !MP_TEAMS.some((t) => t.includes(n.a3) && t.includes(NATIONS[i].a3)));
+  const tgt = (foes.length ? foes : enemies).map((i) => cities[capCityIdx[i]]).sort((a, b) => cellDistKm(a.cell, cap.cell) - cellDistKm(b.cell, cap.cell))[0];
+  const fx = kmX(tgt.cell) - kmX(cap.cell), fz = kmZ(tgt.cell) - kmZ(cap.cell), fl = Math.hypot(fx, fz);
+  const dirx = fx / fl, dirz = fz / fl;
+  const cr = cityRadiusKm(cap.pop, true);
+  const find = (minD, maxD, from, better) => {
+    let best = -1, bs = -1e9;
+    const fxk = kmX(from), fzk = kmZ(from), r = Math.ceil(maxD / CELL);
+    const x0 = cx(from), y0 = cy(from);
+    for (let y = Math.max(2, y0 - r); y <= Math.min(H - 3, y0 + r); y += 2) for (let x = Math.max(2, x0 - r); x <= Math.min(W - 3, x0 + r); x += 2) {
+      const k = y * W + x;
+      const d = Math.hypot(kmX(k) - fxk, kmZ(k) - fzk);
+      if (d < minD || d > maxD || owner[k] !== ni + 1 || !mainLand[k]) continue;
+      const s = better(k, d, ((kmX(k) - fxk) * dirx + (kmZ(k) - fzk) * dirz) / Math.max(d, 1e-6));
+      if (s > bs) { bs = s; best = k; }
+    }
+    return best;
+  };
+  const hq = find(cr + 0.6, cr + 4.5, cap.cell, (k, d, cs) => (wetDist[k] < 0.8 || gBox2[k] > 0.05 ? -1e9 : -gBox2[k] * 120 - Math.abs(d - (cr + 1.8)) * 0.8 + cs * 0.8));
+  const ref = find(1.4, 3.2, hq, (k, d, cs) => (wetDist[k] < 0.6 || gBox2[k] > 0.05 || cellDistKm(k, cap.cell) < cr + 0.3 ? -1e9 : -gBox2[k] * 120 - Math.abs(d - 2) * 0.6 - cs * 0.6));
+  // Startplatz: >= 35 km vom Fremdland (Meer zählt nicht), sonst schrittweise gelockert
+  let spawn = -1, spawnBd = 0;
+  for (const minBd of [35, 28, 22, 16, 10, 3]) {
+    spawn = find(7, 15, cap.cell, (k, d, cs) => (wetDist[k] < 2 || borderDist[ni + 1][k] < minBd || heights[k] > 700 ? -1e9 : -gBox8[k] * 90 - gBox2[k] * 60 + cs * 2.2 - Math.abs(d - 10) * 0.08 + Math.min(borderDist[ni + 1][k], 40) * 0.05));
+    if (spawn >= 0) { spawnBd = minBd; break; }
+  }
+  log(`Startplatz ${n.a3}: Grenzabstand ${borderDist[ni + 1][spawn].toFixed(1)} km (Vorgabe ${spawnBd})`);
+  if (hq < 0 || ref < 0 || spawn < 0) throw new Error('HQ/Raffinerie/Spawn nicht gefunden für ' + n.a3);
+  return { hq, ref, spawn };
+});
+// Ölfelder: je Nation 3 (1 umkämpft nahe einer Grenze zu einer Feindnation laut MP_TEAMS, 2 im Kernland)
 const oilFields = [];
+const teamIdx = (ni) => MP_TEAMS.findIndex((t) => t.includes(NATIONS[ni].a3));
 {
   const cand = [];
   for (let y = 10; y < H - 10; y += 4) for (let x = 10; x < W - 10; x += 4) {
     const k = y * W + x;
-    if (!owner[k] || !mainLand[k] || wet[k] || wetDist[k] < 1.5 || heights[k] > 230 || gBox2[k] > 0.02 || hBox40[k] > 300) continue;
+    if (!owner[k] || !mainLand[k] || wet[k] || wetDist[k] < 1.5) continue;
+    const strict = heights[k] <= 230 && gBox2[k] <= 0.02 && hBox40[k] <= 300;
+    const loose = heights[k] <= 420 && gBox2[k] <= 0.04 && hBox40[k] <= 520;
+    if (!strict && !loose) continue;
     if (cities.some((c) => cellDistKm(c.cell, k) < 9)) continue;
+    if (startPos.some((p) => cellDistKm(p.hq, k) < 9 || cellDistKm(p.spawn, k) < 9)) continue;
     const ownCap = cities.find((c) => c.capital && c.nat === nationOf(k));
-    cand.push({ k, score: -gBox4[k] * 40 - heights[k] / 120 - hBox40[k] / 250 - cellDistKm(ownCap.cell, k) / 22 + rnd() * 2 });
+    cand.push({ k, ni: nationOf(k), score: -gBox4[k] * 40 - heights[k] / 120 - hBox40[k] / 250 - cellDistKm(ownCap.cell, k) / 22 + rnd() * 2 - (strict ? 0 : 6), bd: borderDist[nationOf(k) + 1][k] });
   }
   cand.sort((a, b) => b.score - a.score);
   log(`Ölfeld-Kandidaten: ${cand.length}`);
   const ok = (k, spacing = 18) => !oilFields.some((f) => cellDistKm(f.cell, k) < spacing);
   const add = (k, contested) => oilFields.push({ cell: k, nat: nationOf(k), contested });
-  // umkämpfte: nahe der Grenze zwischen zwei Nationen
-  const pairs = [[1, 0], [1, 2], [0, 2]]; // KRN-VAL, KRN-MAR, VAL-MAR
-  const wantContested = 2;
-  for (const [a, b] of pairs) {
-    if (oilFields.length >= wantContested) break;
-    const c = cand.find((q) => ok(q.k) && [a, b].includes(nationOf(q.k)) && borderDist[nationOf(q.k) + 1][q.k] < 7 && (() => {
-      // andere Nation in der Nähe?
-      const x = cx(q.k), y = cy(q.k);
-      for (let r = 4; r <= 30; r += 4) for (let d = 0; d < 8; d++) { const nx = x + DX[d] * r, ny = y + DY[d] * r; if (nx >= 0 && ny >= 0 && nx < W && ny < H) { const o = owner[ny * W + nx] - 1; if (o >= 0 && o !== nationOf(q.k) && [a, b].includes(o)) return true; } }
-      return false;
-    })());
+  // Feind-Team-Nation in der Nähe (Strahlensuche bis 32 km)?
+  const foeNear = (q) => {
+    const x = cx(q.k), y = cy(q.k);
+    for (let r = 4; r <= 128; r += 4) for (let d = 0; d < 8; d++) { const nx = x + DX[d] * r, ny = y + DY[d] * r; if (nx >= 0 && ny >= 0 && nx < W && ny < H) { const o = owner[ny * W + nx] - 1; if (o >= 0 && teamIdx(o) !== teamIdx(q.ni)) return true; } }
+    return false;
+  };
+  const perNation = OIL_FIELDS_PER_MAP / NATIONS.length;
+  NATIONS.forEach((n, ni) => {
+    // umkämpft: möglichst grenznah (bd 3..8 km) und gut platziert
+    let c = cand.find((q) => q.ni === ni && ok(q.k) && q.bd >= 3 && q.bd < 9 && foeNear(q));
+    if (!c) c = cand.find((q) => q.ni === ni && ok(q.k, 12) && q.bd < 14 && foeNear(q));
     if (c) add(c.k, true);
-  }
-  const have = (ni) => oilFields.filter((f) => f.nat === ni).length;
-  const lowland = NATIONS.map((n, ni) => cand.filter((q) => nationOf(q.k) === ni).length);
-  const quota = NATIONS.map(() => Math.floor(OIL_FIELDS_PER_MAP / NATIONS.length));
-  let spare = OIL_FIELDS_PER_MAP - quota.reduce((a, b) => a + b, 0);
-  while (spare > 0) { let bi = 0, bv = -1; lowland.forEach((l, i) => { const v = l / (quota[i] + 0.5); if (v > bv) { bv = v; bi = i; } }); quota[bi]++; spare--; }
-  for (let guard = 0; oilFields.length < OIL_FIELDS_PER_MAP && guard < 100; guard++) {
-    let ni = -1, bv = -1e9; NATIONS.forEach((n, i) => { const v = quota[i] - have(i) + lowland[i] * 1e-5; if (v > bv) { bv = v; ni = i; } });
-    let c = cand.find((q) => nationOf(q.k) === ni && ok(q.k));
-    if (!c) c = cand.find((q) => nationOf(q.k) === ni && ok(q.k, 11));
-    if (!c) { quota[ni] = have(ni); if (quota.every((q, i) => have(i) >= q)) quota[(ni + 1) % 3]++; continue; }
-    add(c.k, false);
-  }
+  });
+  for (let round = 0; round < perNation; round++) NATIONS.forEach((n, ni) => {
+    const have = oilFields.filter((f) => f.nat === ni).length;
+    if (have >= perNation) return;
+    let c = cand.find((q) => q.ni === ni && ok(q.k) && q.bd >= 12);
+    if (!c) c = cand.find((q) => q.ni === ni && ok(q.k, 12) && q.bd >= 6);
+    if (!c) c = cand.find((q) => q.ni === ni && ok(q.k, 9));
+    if (c) add(c.k, false); else log('WARNUNG: kein Ölfeld für', n.a3);
+  });
 }
 const OIL_SURN = {
   west: ['Karsten', 'Dolnik', 'Petran', 'Zorin', 'Lavrik', 'Medved', 'Brezan', 'Kovar', 'Sedlak', 'Vranec'],
   east: ['Karsten', 'Brandt', 'Voss', 'Hartmann', 'Reiter', 'Lorenz', 'Adler', 'Falke', 'Krüger', 'Nord'],
   south: ['Ferro', 'Sorel', 'Costa', 'Marin', 'Bellini', 'Vero', 'Rossa', 'Salina', 'Corvo', 'Dorada'],
 };
-const OIL_PRE = { west: 'Polje', east: 'Feld', south: 'Campo' };
+OIL_SURN.north = ['Szabó', 'Nagy', 'Kovács', 'Tóth', 'Horváth', 'Varga', 'Balogh', 'Farkas', 'Molnár', 'Fekete'];
+const OIL_PRE = { west: 'Polje', east: 'Feld', south: 'Campo', north: 'Kút' };
 oilFields.forEach((f, i) => {
   const n = NATIONS[f.nat];
   let nm;
@@ -658,6 +706,15 @@ oilFields.forEach((f, i) => {
   f.name = nm; f.id = i + 1;
   f.output = Math.round((f.contested ? 40 + rnd() * 20 : 20 + rnd() * 30));
 });
+{
+  // Team-Bilanz der Förderleistung: Summe je Team auf +-3 % angleichen
+  for (let it = 0; it < 4; it++) {
+    const tot = [0, 0]; oilFields.forEach((f) => { tot[teamIdx(f.nat)] += f.output; });
+    const lo = tot[0] < tot[1] ? 0 : 1, ratio = tot[1 - lo] / tot[lo];
+    if (ratio < 1.02) break;
+    oilFields.forEach((f) => { if (teamIdx(f.nat) === lo) f.output = Math.max(15, Math.min(70, Math.round(f.output * ratio))); });
+  }
+}
 
 // Dörfer-Knoten
 const hubs = [];
@@ -680,37 +737,6 @@ const hubs = [];
   }
 }
 
-// HQ / Raffinerie / Spawn je Nation
-const capCityIdx = NATIONS.map((n, ni) => cities.findIndex((c) => c.nat === ni && c.capital));
-const startPos = NATIONS.map((n, ni) => {
-  const cap = cities[capCityIdx[ni]];
-  const enemies = NATIONS.map((_, i) => i).filter((i) => i !== ni);
-  // Front: Richtung zur nächsten feindlichen Hauptstadt (Krieg laut Szenario), sonst nächste
-  const wars = [...scen.matchAll(/\['(\w+)',\s*'(\w+)'\]/g)].map((m) => [m[1], m[2]]);
-  const foes = enemies.filter((i) => wars.some(([a, b]) => (a === n.a3 && b === NATIONS[i].a3) || (b === n.a3 && a === NATIONS[i].a3)));
-  const tgt = (foes.length ? foes : enemies).map((i) => cities[capCityIdx[i]]).sort((a, b) => cellDistKm(a.cell, cap.cell) - cellDistKm(b.cell, cap.cell))[0];
-  const fx = kmX(tgt.cell) - kmX(cap.cell), fz = kmZ(tgt.cell) - kmZ(cap.cell), fl = Math.hypot(fx, fz);
-  const dirx = fx / fl, dirz = fz / fl;
-  const cr = cityRadiusKm(cap.pop, true);
-  const find = (minD, maxD, from, better) => {
-    let best = -1, bs = -1e9;
-    const fxk = kmX(from), fzk = kmZ(from), r = Math.ceil(maxD / CELL);
-    const x0 = cx(from), y0 = cy(from);
-    for (let y = Math.max(2, y0 - r); y <= Math.min(H - 3, y0 + r); y += 2) for (let x = Math.max(2, x0 - r); x <= Math.min(W - 3, x0 + r); x += 2) {
-      const k = y * W + x;
-      const d = Math.hypot(kmX(k) - fxk, kmZ(k) - fzk);
-      if (d < minD || d > maxD || owner[k] !== ni + 1 || !mainLand[k]) continue;
-      const s = better(k, d, ((kmX(k) - fxk) * dirx + (kmZ(k) - fzk) * dirz) / Math.max(d, 1e-6));
-      if (s > bs) { bs = s; best = k; }
-    }
-    return best;
-  };
-  const hq = find(cr + 0.6, cr + 4.5, cap.cell, (k, d, cs) => (wetDist[k] < 0.8 || gBox2[k] > 0.05 ? -1e9 : -gBox2[k] * 120 - Math.abs(d - (cr + 1.8)) * 0.8 + cs * 0.8));
-  const ref = find(1.4, 3.2, hq, (k, d, cs) => (wetDist[k] < 0.6 || gBox2[k] > 0.05 || cellDistKm(k, cap.cell) < cr + 0.3 ? -1e9 : -gBox2[k] * 120 - Math.abs(d - 2) * 0.6 - cs * 0.6));
-  const spawn = find(7, 15, cap.cell, (k, d, cs) => (wetDist[k] < 2 || borderDist[ni + 1][k] < 3 || heights[k] > 700 ? -1e9 : -gBox8[k] * 90 - gBox2[k] * 60 + cs * 2.2 - Math.abs(d - 10) * 0.08));
-  if (hq < 0 || ref < 0 || spawn < 0) throw new Error('HQ/Raffinerie/Spawn nicht gefunden für ' + n.a3);
-  return { hq, ref, spawn };
-});
 function cityRadiusKm(pop, capital) {
   const popM = Math.max(0.02, pop / 1e6);
   return Math.min(9, 0.9 + Math.sqrt(popM) * 1.5 + (capital ? 0.3 : 0));
@@ -835,7 +861,11 @@ const addCityEdge = (i, j, kind) => { if (i !== j && isFinite(cityCost[i][j]) &&
     if (ok) addCityEdge(i, j, 'rng');
   }
   // mindestens 2 Verbindungen je Nationenpaar mit gemeinsamer Grenze
-  for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+  const adj = Array.from({ length: NN_ }, () => new Array(NN_).fill(0));
+  for (let y = 0; y < H - 1; y++) for (let x = 0; x < W - 1; x++) { const o = owner[y * W + x]; for (const n of [owner[y * W + x + 1], owner[(y + 1) * W + x]]) if (o && n && o !== n) { adj[o - 1][n - 1]++; adj[n - 1][o - 1]++; } }
+  log('Grenzlängen (Zellen): ' + adj.map((r, i) => NATIONS[i].a3 + ':' + r.join('/')).join(' '));
+  for (let a = 0; a < NN_; a++) for (let b = a + 1; b < NN_; b++) {
+    if (adj[a][b] < 40) continue;
     const cand = [];
     for (let i = 0; i < nC; i++) for (let j = 0; j < nC; j++) if (cities[i].nat === a && cities[j].nat === b) cand.push([cityCost[i][j], i, j]);
     cand.sort((x, y) => x[0] - y[0]);
@@ -853,7 +883,7 @@ const addCityEdge = (i, j, kind) => { if (i !== j && isFinite(cityCost[i][j]) &&
 // Autobahnen: Hauptstadt - Hauptstadt (über bestehende Trassen); danach Primär/Sekundär
 const capIdx = capCityIdx;
 let motorOk = 0;
-for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) if (routeP2P(cities[capIdx[a]].cell, cities[capIdx[b]].cell, C_MOTOR, roadL, 1, 0.3)) motorOk++;
+for (let a = 0; a < NN_; a++) for (let b = a + 1; b < NN_; b++) if (routeP2P(cities[capIdx[a]].cell, cities[capIdx[b]].cell, C_MOTOR, roadL, 1, 0.3)) motorOk++;
 const edgeList = [...cityEdges.values()].sort((x, y) => cityCost[x.i][x.j] - cityCost[y.i][y.j]);
 for (const e of edgeList) {
   const big = cities[e.i].capital || cities[e.j].capital || cities[e.i].pop + cities[e.j].pop > 330000;
@@ -899,7 +929,7 @@ log(`Ausweichrouten: ${altCount}`);
     const mx = (kmX(a) + kmX(b)) / 2, mz = (kmZ(a) + kmZ(b)) / 2;
     if (done.some(([x, z]) => Math.hypot(x - mx, z - mz) < 1)) continue;
     done.push([mx, mz]);
-    if (skipped < 3 || rnd() < 0.2) { skipped++; continue; } // bewusst ohne Umgehung -> Engpässe
+    if (skipped < 3 || rnd() < 0.42) { skipped++; continue; } // bewusst ohne Umgehung -> Engpässe
     tried++;
     const zone = new Float32Array(N);
     const x0 = cx(a), y0 = cy(a);
@@ -1187,8 +1217,8 @@ writeFileSync(join(OUT, 'countries.png'), encode({ width: W, height: H, data: rg
 const r2 = (v) => +v.toFixed(2);
 const sortedCities = cities.map((c, i) => ({ c, i })).sort((a, b) => b.c.pop - a.c.pop || a.i - b.i);
 const cityIndex = new Map(sortedCities.map((s, k) => [s.i, k]));
-const MAPCOL = [3, 6, 4];
-const NAME_EN = { VAL: 'Republic of Valdoria', KRN: 'Federation of Kronland', MAR: 'Kingdom of Marenia' };
+const MAPCOL = [3, 6, 4, 5];
+const NAME_EN = { VAL: 'Republic of Valdoria', KRN: 'Federation of Kronland', MAR: 'Kingdom of Marenia', PAN: 'Grand Duchy of Pannonia' };
 const countriesMeta = NATIONS.map((n, ni) => {
   let best = -1, bd = 1e18;
   for (let k = 0; k < N; k += 2) if (owner[k] === ni + 1 && mainLand[k] && !wet[k]) { const d = (kmX(k) - cent[ni][0]) ** 2 + (kmZ(k) - cent[ni][1]) ** 2; if (d < bd) { bd = d; best = k; } }
@@ -1197,7 +1227,7 @@ const countriesMeta = NATIONS.map((n, ni) => {
 });
 const cityNodePos = (cell) => [r2(kmX(cell)), r2(kmZ(cell))];
 const meta = {
-  version: 2,
+  version: 3,
   generated: new Date().toISOString().slice(0, 10),
   sources: [
     'AWS Terrain Tiles / Terrarium (SRTM, GMTED2010, ETOPO1 u. a.) – registry.opendata.aws/terrain-tiles',

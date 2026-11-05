@@ -215,6 +215,24 @@ export class CombatSystem {
     this.hasEnemyM.fill(-1);
   }
 
+  // ------------------------------------------------------------------ Phase 7: Fähigkeiten (Call-ins)
+
+  /**
+   * Flächeneinschlag ohne Schützen (Artillerie-/Luftschlag-Fähigkeiten): löst nach flightSec (Spielsekunden) den normalen
+   * Einschlagspfad aus (combat:impact/-explosion, Splitterschaden an Einheiten/Gebäuden/Bauwerken, Zivilschutz-Abschwächung).
+   * Der Schaden zählt für `owner`; damageMul skaliert die Waffe (1 = Standardwaffe des Trägers).
+   */
+  strikeAt(owner: string, kind: 'howitzer' | 'bomb', x: number, z: number, flightSec = 0, damageMul = 1): void {
+    let base: WeaponDef | undefined;
+    for (const ws of Object.values(WEAPONS_BY_UNIT)) {
+      base = ws.find((wd) => wd.kind === kind);
+      if (base) break;
+    }
+    if (!base) return;
+    const w: WeaponDef = damageMul === 1 ? base : { ...base, damage: base.damage * damageMul };
+    this.schedule(w, { id: 0, owner } as Unit, 0, false, x, this.groundY(x, z), z, 0, flightSec, 0);
+  }
+
   // ------------------------------------------------------------------ Phase 4: Zivilschutz
 
   /**
@@ -370,8 +388,11 @@ export class CombatSystem {
   }
 
   /** Jede Frame aufrufen; dtGameSec = state.lastHours * 3600 */
+  /** Mehrspieler (Gast): Spiegel – keine Kampfsimulation, Wirkung/Effekte kommen als Host-Ereignisse */
+  mirror = false;
+
   update(dtGameSec: number): void {
-    if (!(dtGameSec > 0)) return;
+    if (this.mirror || !(dtGameSec > 0)) return;
     let dt = dtGameSec;
     if (dt > B.MAX_FRAME_SEC) {
       dt = B.MAX_FRAME_SEC;

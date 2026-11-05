@@ -7,6 +7,7 @@ import {
   BT, BT_COUNT, FAR_TOP, SINK, RUBBLE_VARIANTS, GEO_ATTRS, STYLE_SHIFT, getModels, getFarGeo, getBuildingMaterial, rngFrom, terrainHeightKm,
   type BuildingMaterial,
 } from './BuildingModels';
+import { SCALE } from '../core/scale';
 import { BuildingFires, DecalSet, DECAL, StreetLife, setDecalParams, setPropParams, type StreetGrid } from './StreetProps';
 
 export { BT, BT_COUNT, getBuildingMaterial, rngFrom, terrainHeightKm };
@@ -317,7 +318,7 @@ export class BuildingLayer {
     }
   }
 
-  /** LOD je Kachel nach Kameraabstand; visScale = strategische Gebäudeskalierung. */
+  /** LOD je Kachel nach Kameraabstand (nur Detailgrad, nie die Größe). */
   update(cam: THREE.Vector3, enabled: boolean, lod0 = LOD0_DIST, lod1 = LOD1_DIST): void {
     this.flush();
     for (const t of this.tiles) {
@@ -891,9 +892,9 @@ export class Cities {
       setPropParams(this.exag, h);
       this.fires.update(dt, camera, nowS % 4096);
       this.layer.update(camera.position, true);
-      // strategische Gebäudeskalierung (Silhouetten bleiben aus der Ferne lesbar) + größere Fenster
-      this.mat.uniforms.uVis.value = THREE.MathUtils.clamp(1 + (h - 40) / 220, 1, 2.2);
-      this.mat.uniforms.uWinScale.value = THREE.MathUtils.clamp(h / 7, 1, 3.2);
+      // fester Gebäudemaßstab (SCALE.buildings) und konstante Fensterdichte – kein Wachsen mit der Kamerahöhe
+      this.mat.uniforms.uVis.value = SCALE.buildings;
+      this.mat.uniforms.uWinScale.value = 1;
       this.lift.value = THREE.MathUtils.clamp(0.012 + h * 0.0035, 0.012, 8);
     } else {
       this.fires.object.visible = false;
