@@ -2,7 +2,7 @@ import { bus } from '../core/EventBus';
 import type { OilPool } from '../logistics/types';
 import type { GeoData } from '../world/GeoData';
 import { getProfile, type ResourceStock, type StartProfile } from './countryData';
-import { OIL_START_BARRELS, SCENARIO_NATIONS, SCENARIO_WARS } from './scenario';
+import { OIL_START_BARRELS, SCENARIO_NATIONS, SCENARIO_WARS, mpDiplomacy } from './scenario';
 
 /**
  * Spielstunden pro Echtzeitsekunde je Geschwindigkeitsstufe (Index = speed).
@@ -68,6 +68,8 @@ export class GameState {
 
   /** Kriegspaare zu Spielbeginn (Vorgabe aus dem Szenario); main.ts ruft dafür `war.declare(a, b)` */
   scenarioWars(): Array<[string, string]> {
+    // Pannonien ist in der Kampagne neutral; im freien Spiel als PAN gilt die 2-gegen-2-Lage (mit KRN gegen VAL + MAR)
+    if (this.playerA3 === 'PAN') return mpDiplomacy('teams').wars.map(([a, b]) => [a, b]);
     return SCENARIO_WARS.map(([a, b]) => [a, b]);
   }
 

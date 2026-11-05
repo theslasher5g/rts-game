@@ -37,7 +37,7 @@ export function unitModelScale(boost: number, soldier: boolean): number {
 /** Referenzlänge (m) eines Kampfpanzers für die Counter-Schwelle */
 export const COUNTER_REF_M = 7;
 /** Unter dieser Länge (Pixel) wird aus dem 3D-Modell ein NATO-Zeichen */
-export const COUNTER_MIN_PX = 7;
+export const COUNTER_MIN_PX = 8;
 /** Vertikales Sichtfeld der RTS-Kamera (Grad) – RTSCamera.FOV_DEG */
 export const CAMERA_FOV_DEG = 32;
 

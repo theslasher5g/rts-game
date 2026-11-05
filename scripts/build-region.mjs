@@ -543,6 +543,8 @@ function genName(nat) {
 const centroid = NATIONS.map(() => [0, 0, 0]);
 for (let k = 0; k < N; k++) if (owner[k]) { const c = centroid[owner[k] - 1]; c[0] += cx(k); c[1] += cy(k); c[2]++; }
 const cent = centroid.map((c) => [(c[0] / c[2] + 0.5) * CELL, (c[1] / c[2] + 0.5) * CELL]);
+// Team-Symmetrie (2v2): Kronland darf nicht viel näher an Marenia liegen als die übrigen Gegnerpaare -> Hauptstadt Richtung Nordosten ziehen
+const CAP_ANCHOR = { KRN: [0.88, 0.42] };
 NATIONS.forEach((n, ni) => {
   let best = -1, bs = -1e9;
   const sx = kmX(seeds[ni]), sz = kmZ(seeds[ni]);
@@ -552,7 +554,7 @@ NATIONS.forEach((n, ni) => {
     if (seaDist[k] < 3) continue;
     const bd = Math.min(borderDist[ni + 1][k], 35);
     const rv = riverDist[k];
-    let s = -wetFrac[k] * 12 + bd * 1.0 + (rv >= 1.5 && rv <= 7 ? 9 : 0) - gBox4[k] * 220 - 0.12 * Math.hypot(kmX(k) - cent[ni][0], kmZ(k) - cent[ni][1]) - 0.05 * Math.hypot(kmX(k) - sx, kmZ(k) - sz);
+    let s = (CAP_ANCHOR[n.a3] ? -0.45 * Math.hypot(kmX(k) - CAP_ANCHOR[n.a3][0] * WKM, kmZ(k) - CAP_ANCHOR[n.a3][1] * HKM) : 0) - wetFrac[k] * 12 + bd * 1.0 + (rv >= 1.5 && rv <= 7 ? 9 : 0) - gBox4[k] * 220 - 0.12 * Math.hypot(kmX(k) - cent[ni][0], kmZ(k) - cent[ni][1]) - 0.05 * Math.hypot(kmX(k) - sx, kmZ(k) - sz);
     if (s > bs) { bs = s; best = k; }
   }
   if (best < 0) throw new Error('Keine Hauptstadt-Position für ' + n.a3);
@@ -721,7 +723,11 @@ oilFields.forEach((f, i) => {
     const lo = tot[0] < tot[1] ? 0 : 1, ratio = tot[1 - lo] / tot[lo];
     if (ratio < 1.02) break;
     oilFields.forEach((f) => { if (teamIdx(f.nat) === lo) f.output = Math.max(15, Math.min(70, Math.round(f.output * ratio))); });
-  }
+  }  // Ausgleich: Marenia hat die kleinste Armee und die längste Front zu Kronland -> Team West bekommt ca. +7 % Förderleistung, Rest bei Marenia zuerst
+  const tot = [0, 0]; oilFields.forEach((f) => { tot[teamIdx(f.nat)] += f.output; });
+  let need = Math.round(tot[1] * 1.07 - tot[0]);
+  const west = oilFields.filter((f) => teamIdx(f.nat) === 0).sort((x, y) => (NATIONS[x.nat].a3 === 'MAR' ? 0 : 1) - (NATIONS[y.nat].a3 === 'MAR' ? 0 : 1) || x.output - y.output);
+  for (let pass = 0; pass < 6 && need > 0; pass++) for (const f of west) { if (need <= 0) break; const add = Math.min(need, 70 - f.output, 6); if (add > 0) { f.output += add; need -= add; } }
 }
 
 // Dörfer-Knoten
@@ -937,7 +943,7 @@ log(`Ausweichrouten: ${altCount}`);
     const mx = (kmX(a) + kmX(b)) / 2, mz = (kmZ(a) + kmZ(b)) / 2;
     if (done.some(([x, z]) => Math.hypot(x - mx, z - mz) < 1)) continue;
     done.push([mx, mz]);
-    if (skipped < 3 || rnd() < 0.42) { skipped++; continue; } // bewusst ohne Umgehung -> Engpässe
+    if (skipped < 3 || rnd() < 0.62) { skipped++; continue; } // bewusst ohne Umgehung -> Engpässe
     tried++;
     const zone = new Float32Array(N);
     const x0 = cx(a), y0 = cy(a);
