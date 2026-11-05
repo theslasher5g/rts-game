@@ -16,6 +16,8 @@ export interface QualityValues {
   treeDist: number;
   /** Zeitbudget (ms) für den Aufbau von Baumkacheln je Frame */
   treeBuildMs: number;
+  /** Anteil der Baumdichte 0..1 (Pflanzwahrscheinlichkeit im Raster) */
+  treeDensity: number;
   // --- Städte / Dörfer
   /** Anteil der Straßenmöblierung (Laternen, Bäume, Autos …) 0..1 */
   streetPropDensity: number;
@@ -73,7 +75,7 @@ export type QualityState = QualityValues & { level: QualityLevel };
 
 const HOCH: QualityValues = {
   pixelScale: 2, dither: true,
-  treeBudget: 250000, treeDist: 24, treeBuildMs: 6,
+  treeBudget: 250000, treeDist: 24, treeBuildMs: 6, treeDensity: 1,
   streetPropDensity: 1, streetPropDist: 9, cityDetailKm: 36, cityFarKm: 1800, villageDist: 110,
   roadPropBudget: 60000, roadPropDist: 15, roadRibbonDist: 38, roadMaxTiles: 150, bridgeDist: 60, siteModelKm: 75,
   soldierLodKm: 3.5, vehLodKm: 6, vehAnimKm: 5,
@@ -83,8 +85,8 @@ const HOCH: QualityValues = {
 
 const MITTEL: QualityValues = {
   pixelScale: 2, dither: true,
-  treeBudget: 150000, treeDist: 16, treeBuildMs: 5,
-  streetPropDensity: 0.6, streetPropDist: 6, cityDetailKm: 24, cityFarKm: 1200, villageDist: 70,
+  treeBudget: 150000, treeDist: 16, treeBuildMs: 5, treeDensity: 0.7,
+  streetPropDensity: 0.6, streetPropDist: 6, cityDetailKm: 16, cityFarKm: 1200, villageDist: 70,
   roadPropBudget: 36000, roadPropDist: 10, roadRibbonDist: 26, roadMaxTiles: 100, bridgeDist: 40, siteModelKm: 55,
   soldierLodKm: 2.4, vehLodKm: 4, vehAnimKm: 3.5,
   particleBudget: 4200, craterCap: 1800, decalCap: 1900, wreckFrac: 0.6, debrisCap: 1100,
@@ -93,8 +95,8 @@ const MITTEL: QualityValues = {
 
 const NIEDRIG: QualityValues = {
   pixelScale: 3, dither: false,
-  treeBudget: 75000, treeDist: 9, treeBuildMs: 4,
-  streetPropDensity: 0.3, streetPropDist: 3.5, cityDetailKm: 12, cityFarKm: 700, villageDist: 40,
+  treeBudget: 75000, treeDist: 9, treeBuildMs: 4, treeDensity: 0.4,
+  streetPropDensity: 0.3, streetPropDist: 3.5, cityDetailKm: 7, cityFarKm: 700, villageDist: 40,
   roadPropBudget: 18000, roadPropDist: 6, roadRibbonDist: 16, roadMaxTiles: 60, bridgeDist: 22, siteModelKm: 35,
   soldierLodKm: 1.4, vehLodKm: 2.4, vehAnimKm: 2,
   particleBudget: 2100, craterCap: 900, decalCap: 960, wreckFrac: 0.3, debrisCap: 540,

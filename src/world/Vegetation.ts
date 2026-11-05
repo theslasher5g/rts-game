@@ -545,7 +545,7 @@ export class Vegetation {
         const hk = g.heightAt(x, z);
         if (hk <= 0.003) continue;
         const d = this.density(x, z, false);
-        if (d < 0.04 || r0 > d * 1.6) continue;
+        if (d < 0.04 || r0 > d * 1.6 * Q.treeDensity) continue;
         // Hang
         const gx = (g.heightAt(x + 0.8, z) - g.heightAt(x - 0.8, z)) / 1.6, gz = (g.heightAt(x, z + 0.8) - g.heightAt(x, z - 0.8)) / 1.6;
         if (Math.hypot(gx, gz) > 0.5 && ihash(gi, gj, 3) < sstep(0.3, 0.65, Math.hypot(gx, gz))) continue;
