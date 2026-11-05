@@ -100,6 +100,8 @@ export function nationColor(a3: string): number {
 /** Strukturelles Interface der Wegfindung (Pathfinder erfüllt es) */
 export interface RouteLike {
   findRoute(fx: number, fz: number, tx: number, tz: number, mob: import('../nav/types').MobilityProfile): import('../nav/types').Route | null;
+  /** Erreichbarkeit (ja/nein), zwischengespeichert (Pathfinder.routeExists) */
+  routeExists?(fx: number, fz: number, tx: number, tz: number, mob: import('../nav/types').MobilityProfile): boolean;
   passable?(x: number, z: number, mob: import('../nav/types').MobilityProfile): boolean;
   nearestPassable?(x: number, z: number, mob: import('../nav/types').MobilityProfile, maxKm?: number): [number, number] | null;
 }

@@ -242,6 +242,8 @@ export class AICommander {
 
   private move(ids: number[], x: number, z: number, kind: 'move' | 'attackMove' | 'retreat' = 'move'): boolean {
     if (!ids.length || !this.canOrder()) return false;
+    // Grenzschutz: keine Befehle über die Grenze (würden verworfen); rückwärtige Ziele bleiben erlaubt
+    if (!this.ctx.units.borderAllows(this.a3, x, z)) return false;
     this.orders++;
     this.ctx.units.issueMove(ids, x, z, { kind });
     return true;

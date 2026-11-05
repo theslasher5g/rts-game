@@ -41,7 +41,7 @@
 .tut-layer { z-index: 7; }
 .tut-card {
   position: absolute;
-  top: 50px;
+  top: 80px;
   left: 50%;
   transform: translateX(-50%);
   width: min(470px, calc(100vw - 24px));
@@ -126,3 +126,8 @@
 .camp-brief li::before { content: '▸'; position: absolute; left: 0; color: var(--amber); }
 .camp-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: auto; }
 @media (max-width: 640px) { .camp-body { grid-template-columns: 1fr; } .camp-list { border-right: none; border-bottom: 1px solid var(--line-dim); } }
+
+/* QA-A: Tutorial-Karte weicht dem Zieltracker (links) aus */
+@media (max-width: 1100px) {
+  .tut-card { left: 306px; transform: none; width: min(470px, calc(100vw - 306px - 44px)); }
+}

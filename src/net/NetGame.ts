@@ -102,8 +102,50 @@ export class NetGame {
       this.hostSync = new HostSync(ctx, transport, { mode: opts.mode, intervalMs: opts.snapshotIntervalMs, reputation: opts.reputation ?? null, now: opts.now });
       this.restore.push(() => { this.commands?.dispose(); this.hostSync?.dispose(); });
     }
-    this.restore.push(transport.onPeersChanged(() => { /* Peerliste liest der Transport selbst */ }));
+    // Host: Peer-Austritt erkennen -> Nation geht an die KI (main.ts hört auf 'net:peer-left')
+    this.seedPeers(transport);
+    this.restore.push(transport.onPeersChanged((peers) => this.onPeers(peers, ai)));
     bus.emit('net:state', { role: opts.role, connected: true });
+  }
+
+  // ------------------------------------------------------------------ Peers (Host)
+
+  /** peerId -> Nation der aktuell verbundenen menschlichen Mitspieler (ohne Host) */
+  private readonly peerA3 = new Map<string, string>();
+  private readonly leftNations = new Set<string>();
+
+  private seedPeers(transport: NetTransport): void {
+    if (this.role !== 'host') return;
+    for (const p of transport.peers) {
+      if (p.host || p.id === transport.selfId) continue;
+      const a3 = this.opts.nationOfPeer(p.id);
+      if (a3) this.peerA3.set(p.id, a3);
+    }
+  }
+
+  private onPeers(peers: ReadonlyArray<{ id: string }>, ai: Set<string>): void {
+    if (this.role !== 'host') return;
+    const present = new Set(peers.map((p) => p.id));
+    for (const [id, a3] of [...this.peerA3]) {
+      if (present.has(id)) continue;
+      this.peerA3.delete(id);
+      this.handOverToAI(a3, id, ai);
+    }
+  }
+
+  /** Nation eines weggegangenen Spielers an die KI geben (Befehle dieser Nation werden künftig verworfen) */
+  handOverToAI(a3: string, peerId = '', ai?: Set<string>): void {
+    if (this.role !== 'host' || this.leftNations.has(a3)) return;
+    this.leftNations.add(a3);
+    ai?.add(a3);
+    if (!this.opts.aiNations.includes(a3)) this.opts.aiNations.push(a3);
+    bus.emit('toast', { msg: `Spieler (${a3}) hat das Spiel verlassen – die KI übernimmt`, kind: 'warn' });
+    bus.emit('net:peer-left', { a3, peerId });
+  }
+
+  /** Nationen verbundener menschlicher Mitspieler (Host; ohne den Host selbst) */
+  get peerNations(): string[] {
+    return [...this.peerA3.values()];
   }
 
   // ------------------------------------------------------------------ Abfragen

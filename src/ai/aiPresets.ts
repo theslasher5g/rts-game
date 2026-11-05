@@ -79,9 +79,9 @@ export const AI_PRESETS: Record<Difficulty, AIPreset> = {
   },
   mittel: {
     thinkHours: 0.5, maxOrders: 12, skipChance: 0.08, visionKm: 8, seeAll: false, seeTankers: true, memoryHours: 1.5, commitHours: 2,
-    firstWaveHours: 5, waveMin: 8, waveMax: 12, waveCooldown: 6, minRatio: 1.0, retreatFrac: 0.45, retreatEnemyRatio: 1.3,
+    firstWaveHours: 6, waveMin: 8, waveMax: 12, waveCooldown: 6, minRatio: 1.0, retreatFrac: 0.45, retreatEnemyRatio: 1.3,
     defenseFrac: 0.35, minDefenders: 4,
-    raidGroups: 1, raidStartHours: 3, raidCooldown: 4, raidMinUnits: 2,
+    raidGroups: 1, raidStartHours: 4, raidCooldown: 6, raidMinUnits: 2,
     sabotage: true, sabotageStartHours: 6, sabotageCooldown: 10, sabotageMaxEta: 14,
     fireMissions: true, airSorties: true, repairBridges: true, guardBridges: false, counters: false, engineers: 2,
     reserveBarrels: 140, richBarrels: 450, unitCap: 150, produceCycle: 1.0, incomeBonus: 1,

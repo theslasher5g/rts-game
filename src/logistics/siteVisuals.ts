@@ -7,11 +7,13 @@
  * mit der echten Kamera berechnet – kein Verdrahten nötig. Animationen (Pumpenkopf, Fackeln) über animate(realDt).
  * PointsMaterial/Lambert nutzen die eingebauten Shader (logarithmischer Tiefenpuffer ist damit abgedeckt).
  */
+import { isSiteVisible } from '../fog/fogVis';
 import * as THREE from 'three';
 import type { BaseKind } from './types';
 import type { GeoData } from '../world/GeoData';
 import { nationColor } from './prices';
 import { SCALE } from '../core/scale';
+import { Q } from '../core/quality';
 
 export type SiteKind = 'rig' | BaseKind;
 
@@ -426,10 +428,11 @@ interface SiteObj {
   model: Model;
   phase: number;
   gy: number;
+  /** Nebel des Krieges: Standort aktuell für den Spieler zu zeigen (siehe fog/fogVis) */
+  fogVis?: boolean;
 }
 
-const MODEL_MAX_DIST = 75;
-const MARKER_MIN_DIST = 45;
+// Modell-Sichtweite: Q.siteModelKm (hoch = 75 km); Marker ab 60 % davon (hoch = 45 km)
 /** Große Anlagen wachsen weniger stark mit dem Kameraabstand */
 /** Zusatzfaktor je Art relativ zu SCALE.bases (große Anlagen etwas kleiner als kompakte Landmarken) */
 const KIND_SCALE: Partial<Record<SiteKind, number>> = { hq: 0.9, factory: 0.9, refinery: 0.8, airfield: 0.7, shipyard: 0.8 };
@@ -596,15 +599,20 @@ export class SiteLayer {
     const gy = Math.max(0, this.geo.heightAt(_cam.x, _cam.z)) * this.exag;
     const dist = _dir.y < -0.05 ? Math.max(0.3, (_cam.y - gy * 0.5) / -_dir.y) : Math.max(0.3, _cam.y);
     this.camDistKm = dist;
-    const showModels = dist <= MODEL_MAX_DIST;
-    const showMarkers = dist >= MARKER_MIN_DIST;
+    const showModels = dist <= Q.siteModelKm;
+    const showMarkers = dist >= Q.siteModelKm * 0.6;
     const sc = SCALE.bases; // fester Landmarken-Maßstab, unabhängig vom Kameraabstand
     const changed = Math.abs(sc / (this.lastScale || 1) - 1) > 0.03 || this.lastScale === 0;
+    for (const s of this.sites.values()) {
+      const fv = isSiteVisible(s.st.owner, s.st.x, s.st.z);
+      if (s.fogVis !== fv) { s.fogVis = fv; this.markersDirty = true; }
+    }
     if (showMarkers && this.markersDirty) this.rebuildMarkers();
     for (const p of this.markers.values()) p.visible = showMarkers && p.geometry.drawRange.count > 0;
     let flipped = false;
     for (const s of this.sites.values()) {
-      if (s.group.visible !== showModels) { s.group.visible = showModels; flipped = true; }
+      const vis = showModels && s.fogVis !== false;
+      if (s.group.visible !== vis) { s.group.visible = vis; flipped = true; }
     }
     if (showModels && (changed || flipped)) {
       for (const s of this.sites.values()) {
@@ -623,6 +631,7 @@ export class SiteLayer {
     this.markersDirty = false;
     const byKind = new Map<SiteKind, SiteObj[]>();
     for (const s of this.sites.values()) {
+      if (s.fogVis === false) continue;
       const a = byKind.get(s.st.kind === 'rig' ? 'rig' : s.st.kind);
       if (a) a.push(s); else byKind.set(s.st.kind, [s]);
     }

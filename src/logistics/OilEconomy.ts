@@ -143,12 +143,12 @@ export class OilEconomy {
     this.offs.push(
       bus.on('unit:killed', (e) => { if (!this.mirror) this.onKilled(e.id, e.killerId); }),
       bus.on('unit:removed', ({ id }) => { if (!this.mirror) this.onRemoved(id); }),
-      bus.on('nav:edge', () => { for (const fr of this.frt.values()) fr.cutCheckAt = Math.min(fr.cutCheckAt, this.time); }),
-      bus.on('combat:impact', (e) => { if (!this.mirror) this.onImpact(e.weapon, e.x, e.z, e.radiusKm); }),
+      bus.on('nav:edge', () => { for (const fr of this.frt.values()) fr.cutCheckAt = Math.min(fr.cutCheckAt, this.time); this.dispatchClock = 1; }),
+      bus.on('combat:impact', (e) => { if (!this.mirror) this.onImpact(e.weapon, e.x, e.z, e.radiusKm, 1, e.owner); }),
       bus.on('combat:explosion', (e) => {
         if (this.mirror) return;
         const d = EXPLOSION_DMG[e.size] ?? 0;
-        if (d > 0) this.onImpact('howitzer', e.x, e.z, 0.02, d / (IMPACT_DMG.howitzer ?? 55));
+        if (d > 0) this.onImpact('howitzer', e.x, e.z, 0.02, d / (IMPACT_DMG.howitzer ?? 55), e.owner);
       }),
     );
   }
@@ -215,7 +215,7 @@ export class OilEconomy {
       this.freeTrucks.set(o, this.desiredFleet(o));
       this.nextSpawnAt.set(o, 0);
     }
-    this.topUpFleet();
+    if (!this.mirror) this.topUpFleet(); // Gast: Tankwagen kommen mit Host-IDs per Schnappschuss (sonst ID-Kollisionen)
     this.visDirty = true;
     this.syncVisuals();
     for (const o of this.owners) this.emitBalance(o);
@@ -421,11 +421,11 @@ export class OilEconomy {
     this.layer.remove(`b${b.id}`);
     const y = this.groundY(b.x, b.z);
     const s = BASE_DEFS[b.kind].sizeKm;
-    bus.emit('combat:explosion', { x: b.x, y, z: b.z, size: 'huge', fire: true });
+    bus.emit('combat:explosion', { x: b.x, y, z: b.z, size: 'huge', fire: true, owner: b.owner });
     for (let i = 0; i < 4; i++) {
       const a = Math.random() * 6.28, r = Math.random() * s;
       const x = b.x + Math.cos(a) * r, z = b.z + Math.sin(a) * r;
-      bus.emit('combat:explosion', { x, y: this.groundY(x, z), z, size: i < 2 ? 'large' : 'medium', fire: true });
+      bus.emit('combat:explosion', { x, y: this.groundY(x, z), z, size: i < 2 ? 'large' : 'medium', fire: true, owner: b.owner });
     }
     bus.emit('base:destroyed', { baseId: b.id, owner: b.owner });
     bus.emit('toast', { msg: `${b.name ?? b.kind} (${b.owner}) zerstört`, kind: 'warn' });
@@ -438,11 +438,12 @@ export class OilEconomy {
 
   // ------------------------------------------------------------------ Einschläge
 
-  private onImpact(weapon: string, x: number, z: number, radiusKm: number, mult = 1): void {
+  private onImpact(weapon: string, x: number, z: number, radiusKm: number, mult = 1, shooter?: string): void {
     const d0 = (IMPACT_DMG[weapon] ?? 0) * mult;
     if (d0 <= 0) return;
     for (const f of this.fields) {
       if (f.integrity <= 0) continue;
+      if (shooter && f.owner && !this.war.isHostile(shooter, f.owner)) continue;
       const R = 0.1 + radiusKm;
       const d = Math.hypot(f.x - x, f.z - z);
       if (d > R) continue;
@@ -456,6 +457,7 @@ export class OilEconomy {
       }
     }
     for (const b of [...this.bases.values()]) {
+      if (shooter && !this.war.isHostile(shooter, b.owner)) continue;
       const R = BASE_DEFS[b.kind].sizeKm + radiusKm;
       const d = Math.hypot(b.x - x, b.z - z);
       if (d > R) continue;
@@ -552,7 +554,7 @@ export class OilEconomy {
   }
 
   private routeOk(fx: number, fz: number, tx: number, tz: number): boolean {
-    return this.path.findRoute(fx, fz, tx, tz, this.truckMob()) !== null;
+    return this.path.routeExists ? this.path.routeExists(fx, fz, tx, tz, this.truckMob()) : this.path.findRoute(fx, fz, tx, tz, this.truckMob()) !== null;
   }
 
   private destFor(owner: string, x: number, z: number): BaseInfo | null {
@@ -718,16 +720,16 @@ export class OilEconomy {
         bus.emit('convoy:started', { convoyId: rt.info.id, owner, kind: 'oil' });
       }
     }
-    // Erreichbarkeit zyklisch prüfen (ein Feld je Aufruf)
+    // Erreichbarkeit prüfen (bis zu 4 fällige Felder je Aufruf; nach 'nav:edge' sind alle sofort fällig)
     {
+      let budget = 4;
       for (const fr of this.frt.values()) {
         const f = fr.info;
         if (this.time < fr.cutCheckAt || !f.owner) continue;
-        fr.cutCheckAt = this.time + 3;
+        fr.cutCheckAt = this.time + 1;
         const home = this.destFor(f.owner, f.x, f.z);
-        if (!home) { f.cutOff = true; break; }
-        f.cutOff = !this.routeOk(home.x, home.z, f.x, f.z);
-        break; // höchstens ein Feld je Aufruf
+        f.cutOff = home ? !this.routeOk(home.x, home.z, f.x, f.z) : true;
+        if (--budget <= 0) break;
       }
     }
   }
@@ -751,7 +753,10 @@ export class OilEconomy {
       if (defenders === 0 && counts.size > 0) {
         let by = '', bc = 0;
         for (const [o, n] of counts) if (n > bc) { bc = n; by = o; }
-        if (f.capturer !== by) { f.capturer = by; f.captureProgress = 0; }
+        if (f.capturer !== by) {
+          f.capturer = by; f.captureProgress = 0;
+          if (f.owner) bus.emit('alert', { a3: f.owner, kind: 'danger', text: `Ölfeld ${f.name} wird von ${by} eingenommen – Gegenwehr nötig (1 Spielstunde)`, x: f.x, z: f.z });
+        }
         f.captureProgress = (f.captureProgress ?? 0) + dt / CAPTURE_HOURS;
         if (f.captureProgress >= 1) this.captureField(f, by);
       } else if ((f.captureProgress ?? 0) > 0) {

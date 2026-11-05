@@ -116,6 +116,7 @@ export class GameRenderer {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
     this.renderer.autoClear = true;
+    this.renderer.info.autoReset = false; // zwei Render-Aufrufe je Frame (Szene + Post): Zähler selbst je Frame zurücksetzen
     canvas.style.imageRendering = 'pixelated';
 
     const scene = new THREE.Scene();
@@ -227,6 +228,7 @@ export class GameRenderer {
     this.postMat.uniforms.uTime.value = timeSec;
 
     const r = this.renderer;
+    r.info.reset();
     r.setRenderTarget(this.target);
     r.render(this.scene, camera);
     r.setRenderTarget(null);

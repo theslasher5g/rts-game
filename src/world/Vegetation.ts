@@ -5,6 +5,7 @@ import type { NavGraph } from '../nav/NavGraph';
 import { SUN_COLOR, SUN_DIR, forestMask, dryMask } from './Terrain';
 import { cityRadiusKm } from './Cities';
 import { SCALE } from '../core/scale';
+import { Q, onQualityChanged } from '../core/quality';
 
 /**
  * Prozedurale Wälder, Bäume, Büsche, Hecken – in Kacheln um die Kamera gestreamt.
@@ -25,9 +26,7 @@ const BASE_TILE = BASE_SPACING * GRID_N; // 3.96 km
 /** Bäume: Basishöhen (SP_HEIGHT) liegen bereits ~1.3× über real -> etwas unter SCALE.props */
 const TREE_SCALE = SCALE.props * 0.8;
 /** Ausblenden (km Kamerahöhe): darüber wären Bäume Subpixel (kein Hochskalieren) */
-const MAX_DIST = 24;
-const INSTANCE_CAP = 250000;
-const BUILD_BUDGET_MS = 6;
+// MAX_DIST / INSTANCE_CAP / BUILD_BUDGET_MS kommen aus Q (core/quality.ts): treeDist / treeBudget / treeBuildMs
 const MAX_BUILDS_PER_FRAME = 3;
 const CLASS_LIMITS = [9, 18, 36, 72];
 
@@ -291,6 +290,8 @@ export class Vegetation {
     });
     this.group.name = 'Vegetation';
     this.object = this.group;
+    // Qualitätswechsel: Kacheln verwerfen, damit Budget/Sichtweite neu greifen (werden nach und nach neu gebaut)
+    onQualityChanged(() => this.disposeAll());
   }
 
   /** Jahreszeit (Laubfarbe): spring | summer | autumn | winter */
@@ -366,7 +367,7 @@ export class Vegetation {
   update(camera: THREE.PerspectiveCamera, timeSec: number): void {
     const D = camera.position.y;
     this.mat.uniforms.uTime.value = timeSec;
-    if (D > MAX_DIST) {
+    if (D > Q.treeDist) {
       this.group.visible = false;
       return;
     }
@@ -431,10 +432,10 @@ export class Vegetation {
     for (const w of want) {
       const key = `${k}:${w.i}:${w.j}`;
       if (this.tiles.has(key)) continue;
-      if (this.total > INSTANCE_CAP) break;
+      if (this.total > Q.treeBudget) break;
       this.buildTile(k, w.i, w.j, T);
       built++;
-      if (built >= MAX_BUILDS_PER_FRAME || performance.now() - t0 > BUILD_BUDGET_MS) break;
+      if (built >= MAX_BUILDS_PER_FRAME || performance.now() - t0 > Q.treeBuildMs) break;
     }
   }
 

@@ -1,3 +1,4 @@
+import { bus } from '../core/EventBus';
 import type { GeoData } from '../world/GeoData';
 import type { NavGraph } from './NavGraph';
 import { OFFROAD_CLASS, ROAD_CLASSES, type MobilityProfile, type Route } from './types';
@@ -176,6 +177,9 @@ export class Pathfinder {
   private readonly goalSt: Uint32Array;
   private readonly goalS: Int32Array;
   private genN = 0;
+  private readonly existsCache = new Map<string, { ok: boolean; t: number }>();
+  private readonly mobIds = new WeakMap<object, number>();
+  private mobSeq = 0;
   private readonly speedCls = new Float32Array(ROAD_CLASSES.length);
   private readonly rb = new RouteBuilder();
   // Anbindungs-Dijkstra: Kandidatenpunkte je Rasterzelle
@@ -190,6 +194,7 @@ export class Pathfinder {
   constructor(geo: GeoData, graph: NavGraph) {
     this.geo = geo;
     this.graph = graph;
+    bus.on('nav:edge', () => this.existsCache.clear());
     this.W = geo.width;
     this.H = geo.height;
     this.cell = geo.cellKm;
@@ -204,6 +209,23 @@ export class Pathfinder {
   }
 
   // ================================================================== öffentliche API
+
+  /**
+   * Erreichbarkeitsprüfung (nur ja/nein) mit Zwischenspeicher: Start/Ziel auf 0,5-km-Zellen gerundet, Ergebnis 20 s gültig,
+   * verworfen bei Sperrung/Öffnung einer Kante. Für Nachschub-/Wirtschaftsprüfungen, die dieselben Paare ständig neu fragen.
+   */
+  routeExists(fromX: number, fromZ: number, toX: number, toZ: number, mob: MobilityProfile): boolean {
+    let id = this.mobIds.get(mob);
+    if (id === undefined) this.mobIds.set(mob, (id = ++this.mobSeq));
+    const key = `${id}|${Math.round(fromX * 2)}|${Math.round(fromZ * 2)}|${Math.round(toX * 2)}|${Math.round(toZ * 2)}`;
+    const t = now();
+    const hit = this.existsCache.get(key);
+    if (hit && t - hit.t < 20000) return hit.ok;
+    const ok = this.findRoute(fromX, fromZ, toX, toZ, mob) !== null;
+    if (this.existsCache.size > 4000) this.existsCache.clear();
+    this.existsCache.set(key, { ok, t });
+    return ok;
+  }
 
   findRoute(fromX: number, fromZ: number, toX: number, toZ: number, mob: MobilityProfile): Route | null {
     const t0 = now();

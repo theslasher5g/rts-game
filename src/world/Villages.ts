@@ -7,6 +7,7 @@ import { BT, BuildingLayer, STRIDE, WALL_MED, WALL_NORDIC, WALL_WEST, ROOF_MED, 
 import { STYLE_SHIFT, getBuildingMaterial } from './BuildingModels';
 import { BuildingFires, DECAL, DecalSet, PROP, PropLayer, setDecalParams, setPropParams, type PropInst } from './StreetProps';
 import { forestMask } from './Terrain';
+import { Q } from '../core/quality';
 
 /**
  * Prozedurale Dörfer und Kleinstädte (deterministisch aus einem 5-km-Zellraster), in 20-km-Chunks um die Kamera gestreamt.
@@ -25,7 +26,7 @@ const CELL_KM = 5;
 const CHUNK_CELLS = 4;
 const CHUNK_KM = CELL_KM * CHUNK_CELLS;
 const ID_OFFSET = 1_000_000;
-const MAX_VISIBLE_D = 110;
+// Sichtweite der Dörfer: Q.villageDist (hoch = 110 km)
 const MAX_BUILDS_PER_FRAME = 1;
 
 function ihash(a: number, b: number, c: number): number {
@@ -579,7 +580,7 @@ export class Villages {
   update(camera: THREE.PerspectiveCamera): void {
     if (!this.show) return;
     const D = camera.position.y;
-    if (D > MAX_VISIBLE_D) {
+    if (D > Q.villageDist) {
       this.group.visible = false;
       return;
     }

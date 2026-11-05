@@ -16,6 +16,7 @@ import type { Unit } from '../units/types';
 import type { UnitManager } from '../units/UnitManager';
 import type { GeoData } from '../world/GeoData';
 import { setFogUniforms, type FogUniforms } from './fogShader';
+import { Q } from '../core/quality';
 
 export interface FogOptions {
   /** a3 des Spielers (null = kein Spiel: alles sichtbar) */
@@ -31,8 +32,7 @@ export interface FogEconomyLike {
 }
 
 const CELL_KM = 0.5;
-const JOB_INTERVAL = 0.3;       // s reale Zeit zwischen Berechnungen
-const BUDGET_MS = 3;            // Zeitbudget je update()
+// Intervall zwischen Berechnungen / Zeitbudget je update(): Q.fogUpdateMs / Q.fogBudgetMs (hoch = 300 ms / 3 ms)
 const SYNC_INTERVAL_H = 3;      // Spielstunden zwischen syncFromEconomy
 const MAX_R_GROUND_KM = 15;
 const MAX_R_AIR_KM = 25;
@@ -379,11 +379,11 @@ export class FogOfWar {
     }
     this.timer += realDt;
     if (!this.jobActive) {
-      if (this.timer < JOB_INTERVAL) return;
+      if (this.timer < Q.fogUpdateMs / 1000) return;
       this.timer = 0;
       this.beginJob();
     }
-    this.runJob(BUDGET_MS);
+    this.runJob(Q.fogBudgetMs);
   }
 
   /** Erzwingt eine vollständige Neuberechnung jetzt (Start/Tests) */

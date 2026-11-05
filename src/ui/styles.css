@@ -452,7 +452,7 @@ button, input, select { font-family: var(--font); }
 
 .hud-info {
   position: absolute;
-  right: 12px;
+  right: 30px;
   bottom: 12px;
   width: 250px;
 }
@@ -692,3 +692,80 @@ input[type='range']::-moz-range-thumb { width: 10px; height: 14px; background: v
   .mm-card .mc-more { display: none; }
   .mc-blurb { min-height: 0; }
 }
+
+/* ==========================================================================
+   QA-A: Hauptmenü als Raster (kein Überlappen der Karten mit Briefing/Startknopf)
+   ========================================================================== */
+.ui-layer.main-menu {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  column-gap: 14px;
+  row-gap: 8px;
+  padding: 12px 14px 12px;
+}
+.main-menu .mm-title { position: static; transform: none; grid-column: 1 / -1; grid-row: 1; justify-self: center; }
+.main-menu .mm-brief { position: static; grid-column: 1; grid-row: 2; width: auto; max-width: 470px; align-self: start; max-height: 100%; overflow-y: auto; scrollbar-width: thin; }
+.main-menu .mm-side { position: static; grid-column: 2; grid-row: 2; align-self: start; max-height: 100%; overflow-y: auto; scrollbar-width: thin; }
+.main-menu .mm-cards { position: static; grid-column: 1 / -1; grid-row: 3; }
+.main-menu .mm-card { flex: 1 1 0; max-width: 340px; }
+@media (max-height: 800px), (max-width: 1100px) {
+  .main-menu .mm-card .sect-title, .main-menu .mm-card .mc-rel, .main-menu .mm-card .bullets { display: none; }
+  .main-menu .mm-card .mc-blurb { min-height: 0; }
+}
+@media (max-height: 640px), (max-width: 1100px) {
+  .main-menu .mm-card .mc-blurb { display: none; }
+  .main-menu .mm-card { padding: 5px 8px 6px; }
+  .main-menu .mm-card .mc-flag { font-size: 22px; }
+  .main-menu .mm-card .mc-name { font-size: 13px; }
+  .main-menu .mm-card .mc-sub { display: none; }
+  .main-menu .mm-title h1 { font-size: 26px; }
+  .main-menu .mm-title .mm-sub { display: none; }
+  .main-menu .mm-title .mm-ver { display: none; }
+  .main-menu .mm-brief-body li:nth-child(n+4) { display: none; }
+  .main-menu .mm-side-body { gap: 5px; padding: 8px 10px; }
+  .main-menu .mm-side-body .btn-primary { padding: 6px 8px; font-size: 13px; }
+  .main-menu .mm-side .mm-note { display: none; }
+}
+@media (max-width: 1000px) {
+  .main-menu .mm-brief { max-width: none; }
+  .main-menu .mm-side { width: 230px; }
+  .main-menu .mm-cards { gap: 6px; }
+  .main-menu .mm-card .cd-mil { font-size: 10px; }
+}
+
+/* QA-A: HUD bei kleinen Fenstern */
+@media (max-width: 1100px) {
+  .unit-panel { right: 12px !important; max-width: calc(100vw - 338px) !important; width: calc(100vw - 338px) !important; }
+  .hud-info { bottom: 118px; width: 220px; }
+  .evl { bottom: 278px !important; }
+}
+@media (max-height: 760px) {
+  .ms-panel { max-height: calc(100vh - 392px); display: flex; flex-direction: column; }
+  .ms-panel .ms-body { overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+}
+
+/* QA-A: gesperrte Zeitsteuerung (Mehrspieler-Gast) */
+.hud-speed .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.hud-speed .btn.active:disabled { opacity: 0.85; }
+
+/* QA-A: Mehrspieler-Anzeige, Chat */
+.net-panel { position: absolute; right: 30px; top: 118px; width: 210px; z-index: 4; font-size: 11px; }
+.net-panel .panel-head { padding: 3px 8px; font-size: 10px; }
+.net-conn { font-size: 10px; letter-spacing: 0.06em; }
+.net-conn.good { color: var(--good); } .net-conn.warn { color: var(--warn); } .net-conn.bad { color: var(--bad); animation: blink 1s steps(2) infinite; }
+.net-list { padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 2px; }
+.net-row { display: flex; align-items: center; gap: 6px; }
+.net-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-tag { font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
+.net-tag.ally { color: var(--good); } .net-tag.foe { color: var(--bad); }
+.net-lost { position: absolute; left: 50%; top: 96px; transform: translateX(-50%); z-index: 30; padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; align-items: center; border-color: var(--bad); text-align: center; }
+.net-lost-msg { color: #ff9a80; letter-spacing: 0.06em; }
+.chat-box { position: absolute; left: 326px; bottom: 196px; width: 320px; z-index: 6; pointer-events: none !important; }
+.chat-box.hidden { display: none; }
+.chat-log { display: flex; flex-direction: column; gap: 1px; font-size: 12px; text-shadow: 1px 1px 0 #000, -1px 0 0 #000; }
+.chat-line { background: rgba(10, 11, 8, 0.6); padding: 1px 6px; word-break: break-word; transition: opacity 1.5s; }
+.chat-line.faded { opacity: 0.35; }
+.chat-line b { font-weight: normal; color: var(--amber); }
+.chat-input { pointer-events: auto; width: 100%; margin-top: 3px; font: inherit; font-size: 12px; color: var(--amber-hi); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--amber); padding: 4px 8px; outline: none; user-select: text; }
+.chat-input.hidden { display: none; }

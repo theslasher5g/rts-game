@@ -1,5 +1,6 @@
 import { bus } from '../core/EventBus';
 import { DEFAULT_SETTINGS, type Settings } from '../core/types';
+import { Q, QUALITY_LEVELS, isQualityLevel, onQualityChanged, setQuality, type QualityLevel } from '../core/quality';
 
 const STORAGE_KEY = 'ww3.settings';
 
@@ -22,11 +23,18 @@ const CONTROLS: Control[] = [
   { kind: 'bool', key: 'showCities', label: 'Städte', desc: 'Städte und Hauptstädte anzeigen' },
   { kind: 'bool', key: 'showRoads', label: 'Straßen & Schienen', desc: 'Straßen-, Schienen- und Fährnetz anzeigen' },
   { kind: 'bool', key: 'fogOfWar', label: 'Nebel des Krieges', desc: 'Gegner nur im Sichtbereich eigener Einheiten sehen' },
+  { kind: 'bool', key: 'showFps', label: 'FPS anzeigen', desc: 'Leistungsanzeige (auch Strg+Umschalt+P)' },
 ];
+
+const QUALITY_LABEL: Record<QualityLevel, string> = { niedrig: 'Niedrig', mittel: 'Mittel', hoch: 'Hoch' };
 
 /** Lädt gespeicherte Einstellungen (localStorage) über DEFAULT_SETTINGS. */
 export function loadSettings(): Settings {
   const s: Settings = { ...DEFAULT_SETTINGS };
+  // Qualität: Preset aus core/quality (gespeichert oder automatisch erkannt) bestimmt auch die Standard-Pixelgröße
+  s.quality = Q.level;
+  s.pixelScale = Q.pixelScale;
+  s.dithering = Q.dither;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -36,6 +44,8 @@ export function loadSettings(): Settings {
         const v = stored[k];
         if (v !== undefined && typeof v === typeof DEFAULT_SETTINGS[k]) target[k] = v;
       }
+      if (!isQualityLevel(s.quality)) s.quality = Q.level;
+      if (s.quality !== Q.level) s.quality = Q.level; // ww3.quality ist maßgeblich
     }
   } catch {
     /* localStorage nicht verfügbar oder beschädigt – Standardwerte */
@@ -66,6 +76,14 @@ export class SettingsPanel {
   constructor(root: HTMLElement, settings: Settings) {
     this.settings = settings;
     SettingsPanel.instance = this;
+    // Qualitätswechsel (Panel, Konsole, Overlay-Vorschlag): Preset-Standards in die Einstellungen übernehmen
+    onQualityChanged((q) => {
+      this.settings.quality = q.level;
+      this.settings.pixelScale = q.pixelScale;
+      this.settings.dithering = q.dither;
+      this.sync.forEach((f) => f());
+      this.changed();
+    });
 
     this.backdrop = document.createElement('div');
     this.backdrop.className = 'modal-backdrop hidden';
@@ -86,6 +104,7 @@ export class SettingsPanel {
 
     const body = document.createElement('div');
     body.className = 'modal-body scroll';
+    body.appendChild(this.buildQualityRow());
     for (const c of CONTROLS) body.appendChild(this.buildRow(c));
 
     const foot = document.createElement('div');
@@ -95,6 +114,10 @@ export class SettingsPanel {
     reset.textContent = 'Standard';
     reset.addEventListener('click', () => {
       Object.assign(this.settings, DEFAULT_SETTINGS);
+      setQuality(Q.level, false);
+      this.settings.quality = Q.level;
+      this.settings.pixelScale = Q.pixelScale;
+      this.settings.dithering = Q.dither;
       this.sync.forEach((f) => f());
       this.changed();
     });
@@ -148,6 +171,42 @@ export class SettingsPanel {
   private changed(): void {
     saveSettings(this.settings);
     bus.emit('settings:changed', { settings: this.settings });
+  }
+
+  /** Grafikqualität: drei Schaltflächen (Preset setzt Budgets, Pixelgröße und Dithering) */
+  private buildQualityRow(): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'set-row';
+    const label = document.createElement('label');
+    label.textContent = 'Grafikqualität';
+    const desc = document.createElement('span');
+    desc.className = 'set-desc';
+    desc.textContent = 'Sichtweiten, Detailmengen, Effekte, Pixelgröße';
+    label.appendChild(desc);
+    const group = document.createElement('div');
+    group.className = 'set-quality';
+    group.style.cssText = 'display:flex;gap:6px';
+    const btns = new Map<QualityLevel, HTMLButtonElement>();
+    for (const lv of QUALITY_LEVELS) {
+      const b = document.createElement('button');
+      b.className = 'btn btn-sm';
+      b.dataset.quality = lv;
+      b.textContent = QUALITY_LABEL[lv];
+      b.addEventListener('click', () => {
+        setQuality(lv); // der Abonnent im Konstruktor übernimmt Pixelgröße/Dithering und meldet 'settings:changed'
+        this.sync.forEach((f) => f());
+      });
+      btns.set(lv, b);
+      group.appendChild(b);
+    }
+    const val = document.createElement('span');
+    val.className = 'set-val';
+    this.sync.push(() => {
+      for (const [lv, b] of btns) b.classList.toggle('active', lv === Q.level);
+    });
+    this.sync[this.sync.length - 1]();
+    row.append(label, group, val);
+    return row;
   }
 
   private buildRow(c: Control): HTMLElement {

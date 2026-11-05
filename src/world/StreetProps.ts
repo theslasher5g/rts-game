@@ -1,3 +1,4 @@
+import { Q } from '../core/quality';
 import * as THREE from 'three';
 import type { GeoData } from './GeoData';
 import { SCALE } from '../core/scale';
@@ -392,6 +393,9 @@ export class PropLayer {
   readonly group = new THREE.Group();
   readonly count: number;
   private readonly tiles: PTile[] = [];
+  /** Instanzgruppen (Mesh-Geometrie, volle Anzahl, Versatz für unverzerrtes Runden) – für Qualitäts-Dichte */
+  private readonly groups: Array<{ g: THREE.InstancedBufferGeometry; n: number; off: number }> = [];
+  private density = 1;
 
   constructor(geo: GeoData, list: PropInst[], tileKm = 3) {
     this.count = list.length;
@@ -418,6 +422,12 @@ export class PropLayer {
         g.setAttribute('position', base.getAttribute('position'));
         g.setAttribute('normal', base.getAttribute('normal'));
         g.setAttribute('aCol', base.getAttribute('aCol'));
+        // deterministisch mischen: die ersten k Instanzen sind dann eine gleichmäßige Stichprobe (Qualitätsstufen)
+        for (let a = arr.length - 1, h = (arr.length * 2654435761) >>> 0; a > 0; a--) {
+          h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
+          const b = h % (a + 1);
+          const tmp = arr[a]; arr[a] = arr[b]; arr[b] = tmp;
+        }
         const n = arr.length;
         const aPos = new Float32Array(n * 4), aVar = new Float32Array(n * 3);
         for (let k = 0; k < n; k++) {
@@ -430,6 +440,7 @@ export class PropLayer {
         g.setAttribute('aPos', new THREE.InstancedBufferAttribute(aPos, 4));
         g.setAttribute('aVar', new THREE.InstancedBufferAttribute(aVar, 3));
         g.instanceCount = n;
+        this.groups.push({ g, n, off: ((this.groups.length * 0.6180339887) % 1) });
         const m = new THREE.Mesh(g, mat);
         m.frustumCulled = false;
         m.visible = false;
@@ -440,6 +451,13 @@ export class PropLayer {
     }
     this.group.name = 'Props';
     this.group.visible = true;
+  }
+
+  /** Anteil 0..1 der Instanzen, der gezeichnet wird (Qualitätsstufe) */
+  setDensity(f: number): void {
+    if (f === this.density) return;
+    this.density = f;
+    for (const gr of this.groups) gr.g.instanceCount = f >= 1 ? gr.n : Math.min(gr.n, Math.floor(gr.n * f + gr.off));
   }
 
   update(cam: THREE.Vector3, maxDist: number): void {
@@ -1130,8 +1148,9 @@ export class StreetLife {
     this.exag = e;
   }
 
-  update(camera: THREE.PerspectiveCamera, maxDist = 9): void {
+  update(camera: THREE.PerspectiveCamera, maxDist = Q.streetPropDist): void {
     const p = camera.position;
+    this.layer.setDensity(Q.streetPropDensity);
     setPropParams(this.exag, p.y);
     setDecalParams(this.exag, p.y);
     this.layer.update(p, maxDist);

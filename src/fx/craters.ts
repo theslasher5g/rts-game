@@ -8,6 +8,7 @@
  * Alle Profile/Farben entstehen im Vertex-Shader aus Instanzdaten (kein Per-Frame-Aufwand außer uTime).
  */
 import * as THREE from 'three';
+import { Q } from '../core/quality';
 
 export const CRATER_CAP = 3000;
 const SEGS = 18;
@@ -231,7 +232,7 @@ export class CraterLayer {
     if (n >= 4) radiusM *= Math.max(0.55, 1 - 0.07 * (n - 3));
     let i: number;
     if (n >= 10 && oldest >= 0) i = oldest;
-    else { i = this.head; this.head = (this.head + 1) % CRATER_CAP; }
+    else { i = this.head; this.head = (this.head + 1) % Math.min(CRATER_CAP, Q.craterCap); }
     if (i >= this.count) this.count = i + 1;
     this.aC[i * 3] = x; this.aC[i * 3 + 1] = y; this.aC[i * 3 + 2] = z;
     this.aG[i * 4] = gx; this.aG[i * 4 + 1] = gz; this.aG[i * 4 + 2] = radiusM; this.aG[i * 4 + 3] = depth;

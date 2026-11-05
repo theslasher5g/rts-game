@@ -23,6 +23,7 @@ import { SCALE } from '../core/scale';
 import { SUN_DIR } from '../world/Terrain';
 import { CraterLayer } from './craters';
 import { DECAL_FRAG, DECAL_VERT, PARTICLE_FRAG, PARTICLE_VERT, RIBBON_FRAG, RIBBON_VERT } from './shaders';
+import { Q } from '../core/quality';
 
 // ---------------------------------------------------------------- Tuning
 /** fester Effektmaßstab (siehe core/scale.ts) – kein Wachsen mit dem Kameraabstand */
@@ -30,8 +31,8 @@ const FX_SCALE = SCALE.effects;
 /** Standard-Skalierungsexponent der Effekte: Größe(m) · 0.001 · visScale^EFFECT_SC (etwas schwächer als die Einheiten, damit Explosionen nicht den Bildschirm füllen) */
 const EFFECT_SC = 0.85;
 const PARTICLE_CAP = 24000;
-const SPAWN_BUDGET = 7000; // Partikel pro Frame (Notbremse)
-const DECAL_CAP = 3200;
+// Partikel pro Frame (Notbremse): Q.particleBudget (hoch = 7000)
+const DECAL_CAP = 3200; // Array-Größe; wirksame Grenze: Q.decalCap
 /** Kraterschalen sichtbar bis zu diesem Kameraabstand (km); darüber nur flache Dunkelscheiben (Decal) */
 const BOWL_MAX_DIST = 75;
 /** Kraterradius in Metern je Waffe (Einschlag am Boden). 0/fehlend = kein Krater (Kleinwaffen, Flak, SAM, Torpedo) */
@@ -114,7 +115,7 @@ class Particles {
   private readonly scF = new Float32Array(PARTICLE_CAP);
   private head = 0;
   private hi = 0;
-  budget = SPAWN_BUDGET;
+  budget = Q.particleBudget;
   alive = 0;
 
   constructor() {
@@ -286,7 +287,7 @@ class Particles {
         a.needsUpdate = true;
       }
     }
-    this.budget = SPAWN_BUDGET;
+    this.budget = Q.particleBudget;
   }
 }
 
@@ -339,8 +340,9 @@ class DecalLayer {
   }
 
   add(x: number, y: number, z: number, gx: number, gz: number, radiusM: number, type: number, alpha: number, born: number, life: number): void {
+    const cap = Math.min(this.cap, Q.decalCap);
     const i = this.head;
-    this.head = (this.head + 1) % this.cap;
+    this.head = (this.head + 1) % cap;
     if (i >= this.count) this.count = i + 1;
     this.aC[i * 3] = x; this.aC[i * 3 + 1] = y; this.aC[i * 3 + 2] = z;
     this.aG[i * 4] = gx; this.aG[i * 4 + 1] = gz; this.aG[i * 4 + 2] = radiusM; this.aG[i * 4 + 3] = type;
@@ -1051,7 +1053,7 @@ export class Effects {
   // ------------------------------------------------------------ Trümmer
   private addDebris(ox: number, oy: number, oz: number, lx: number, ly: number, lz: number, vx: number, vy: number, vz: number, sx: number, sy: number, sz: number, life: number, floorM: number, color: number): void {
     const i = this.dbHead;
-    this.dbHead = (this.dbHead + 1) % DEBRIS_CAP;
+    this.dbHead = (this.dbHead + 1) % Math.min(DEBRIS_CAP, Q.debrisCap);
     if (i >= this.dbHi) this.dbHi = i + 1;
     const o = i * 3;
     this.dbOrg[o] = ox; this.dbOrg[o + 1] = oy; this.dbOrg[o + 2] = oz;
@@ -1533,7 +1535,7 @@ export class Effects {
   private spawnWreck(x: number, _y: number, z: number, heading: number, category: string): void {
     const kind = wreckKindOf(category);
     const mesh = this.wreckMeshes.get(kind)!;
-    const cap = WRECK_CAP[kind];
+    const cap = Math.max(4, Math.floor(WRECK_CAP[kind] * Q.wreckFrac));
     const head = this.wreckHead.get(kind)!;
     let cnt = this.wreckCount.get(kind)!;
     this.wreckHead.set(kind, (head + 1) % cap);

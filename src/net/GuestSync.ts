@@ -178,8 +178,8 @@ export class GuestSync {
   private onDisconnect(reason: string): void {
     if (this.disconnected) return;
     this.disconnected = true;
-    bus.emit('net:state', { role: 'guest', connected: false });
-    bus.emit('toast', { msg: `Verbindung zum Host verloren${reason ? ` (${reason})` : ''}`, kind: 'error' });
+    bus.emit('net:state', { role: 'guest', connected: false, reason: 'Host getrennt' });
+    bus.emit('toast', { msg: `Host getrennt${reason ? ` (${reason})` : ''}`, kind: 'error' });
   }
 
   // ------------------------------------------------------------------ Schnappschuss anwenden

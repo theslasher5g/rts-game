@@ -6,6 +6,9 @@ import './ui/production.css';
 
 import { bus } from './core/EventBus';
 import { Input } from './core/Input';
+import { perf } from './core/perf';
+import { Q, setQuality } from './core/quality';
+import { PerfOverlay } from './ui/PerfOverlay';
 import type { Settings } from './core/types';
 import { RTSCamera } from './camera/RTSCamera';
 import { SelectionController } from './control/SelectionController';
@@ -18,6 +21,7 @@ import { FieldBars } from './ui/FieldBars';
 import { Sfx } from './audio/Sfx';
 import { NetGame } from './net/NetGame';
 import { FogOfWar } from './fog/FogOfWar';
+import { setFogProvider } from './fog/fogVis';
 import type { GameContext } from './game/context';
 import { mpDiplomacy } from './game/scenario';
 import { MissionSystem, Tutorial, nextMissionId, resolveMission } from './game/missions';
@@ -25,6 +29,8 @@ import { EndScreen } from './ui/EndScreen';
 import { ProtectBanner } from './ui/ProtectBanner';
 import { MissionPanel } from './ui/MissionPanel';
 import { TutorialOverlay } from './ui/TutorialOverlay';
+import { NetStatus } from './ui/NetStatus';
+import { ChatBox, nationColorOf } from './ui/ChatBox';
 import { EconomyAI } from './logistics/EconomyAI';
 import { OilEconomy } from './logistics/OilEconomy';
 import { SupplySystem } from './logistics/SupplySystem';
@@ -154,6 +160,7 @@ async function boot() {
   const ctx: GameContext = { geo, state, war, units, combat, economy, production, supply, civil, structures, cities, graph, pathfinder, player: playerOf };
   const fog = new FogOfWar(geo, units, { player: playerOf, allies: (a3) => getProfile(a3)?.allies ?? [], smoke: effects.smoke });
   fog.bindTerrain(terrain);
+  setFogProvider(fog);
   fog.attachEconomy(economy);
   unitRenderer.setFog(fog);
   combat.setFog(fog);
@@ -166,6 +173,9 @@ async function boot() {
   const endScreen = new EndScreen(uiRoot, missions);
   const tutorial = new Tutorial({ ctx, getCameraDistance: () => rts.distance, getSelectedIds: () => ctl.selectedUnits().map((u) => u.id) });
   const tutorialOverlay = new TutorialOverlay(uiRoot, tutorial);
+  const netStatus = new NetStatus(uiRoot);
+  const chatBox = new ChatBox(uiRoot);
+  bus.on('net:state', ({ connected }) => netStatus.setConnection(connected));
   const protectBanner = new ProtectBanner(uiRoot, state);
 
   // --- Fähigkeiten, Funkprotokoll, Ölfeld-Balken (Phase 7)
@@ -209,6 +219,7 @@ async function boot() {
   const fieldBars = new FieldBars(uiRoot, economy, () => rts.camera, nationColour, { groundY: (x, z) => picker.groundY(x, z), isVisible: (x, z) => fog.isExplored(x, z) });
   ctl.baseProvider = () => (state.playerA3 ? economy.basesOf(state.playerA3) : []);
   // Grenzschutz: Gebiet von Verbündeten ist für eigene Einheiten offen
+  units.borderToastFor = (owner) => owner === state.playerA3; // KI-Einheiten lösen keinen Grenz-Hinweis aus
   units.borderFriendly = (owner, a3) => !!getProfile(owner)?.allies.includes(a3) || !!getProfile(a3)?.allies.includes(owner);
   let protectActive = false;
   const syncProtection = () => {
@@ -229,6 +240,12 @@ async function boot() {
   // Mehrspieler (Host-autoritativ): null im Einzelspiel
   let net: NetGame | null = null;
   let aiHeld = false;
+  // Mehrspieler: verlässt ein Gast das Spiel, übernimmt eine KI seine Nation (Host)
+  bus.on('net:peer-left', ({ a3 }) => {
+    if (!net || !net.simulates || ais.some((a) => a.a3 === a3)) return;
+    econAI.setEnabled(a3, true);
+    ais.push(new AICommander(ctx, { a3, difficulty: 'mittel', style: 'aggressor', econ: econAI }));
+  });
   endScreen.onAction = (a) => {
     if (a === 'menu') return false;
     const cur = missions.current;
@@ -301,6 +318,7 @@ async function boot() {
     for (const [a, b] of mp ? mpDiplomacy(mp.mode).wars : state.scenarioWars()) war.declare(a, b);
     // Gäste erzeugen keine Einheiten: der Host schickt sie per Schnappschuss
     if (!isGuest) for (const p of START_PROFILES) units.spawnStartingForces(p.a3, p.a3 === countryA3);
+    economy.mirror = isGuest; // Gast: keine lokalen Tankwagen (Host-IDs kommen per Schnappschuss)
     economy.loadScenario(geo.meta.scenario);
     prodPanel.show();
     abilityBar.show();
@@ -321,6 +339,8 @@ async function boot() {
     ais.length = 0;
     const wars = war.listPairs();
     // Mehrspieler: Nationen ohne Mensch werden (wenn gewünscht) vom Host per KI geführt, Gäste führen keine KI aus
+    // econAI steuert sonst jede Nation außer der des Host-Spielers: menschliche Mitspieler ausnehmen
+    for (const p of START_PROFILES) econAI.setEnabled(p.a3, !(mp && mpInfo && !mpInfo.aiNations.includes(p.a3)));
     if (mp && mpInfo && !isGuest) {
       for (const a3 of mpInfo.aiNations) ais.push(new AICommander(ctx, { a3, difficulty: 'mittel', style: 'aggressor', econ: econAI }));
     }
@@ -339,6 +359,8 @@ async function boot() {
     // Netzwerk: Host rechnet, Gäste spiegeln (Befehle laufen per Proxy zum Host)
     if (net) net.dispose();
     net = null;
+    netStatus.detach();
+    chatBox.detach();
     endScreen.suppress = !!mp;
     if (mp && session && mpInfo) {
       net = new NetGame(ctx, session.transport, {
@@ -351,6 +373,9 @@ async function boot() {
         reputation,
         abilities: abilities as unknown as { use: (...args: unknown[]) => unknown },
       });
+      netStatus.attach(net, mpInfo);
+      const colorByName = new Map(mpInfo.players.map((p) => [p.name, nationColorOf(p.a3)]));
+      chatBox.attach(session.transport, (name) => colorByName.get(name) ?? '');
     }
     const hq = geo.meta.scenario?.nations.find((n) => n.a3 === countryA3)?.hq;
     if (hq) rts.focus(hq[0], hq[1], 80);
@@ -419,6 +444,22 @@ async function boot() {
   window.addEventListener('resize', resize);
   resize();
 
+  // --- Leistungsanzeige (Strg+Umschalt+P) + Qualitätsvorschlag bei niedriger Bildrate
+  const perfOverlay = new PerfOverlay(uiRoot, {
+    renderer: gfx.renderer,
+    inGame: () => !!state.playerA3,
+    counts: () => ({
+      units: unitRenderer.instanceTotal,
+      trees: worldDetail.vegetation.stats.instances,
+      bldg: cities.buildingCount,
+      street: cities.stats().street.total,
+      road: roads.propCount,
+      parts: effects.particleCount,
+    }),
+  });
+  perfOverlay.setVisible(settings.showFps);
+  bus.on('settings:changed', ({ settings: s }) => perfOverlay.setVisible(s.showFps));
+
   // --- Game-Loop
   let last = performance.now();
   const t0 = last;
@@ -426,34 +467,45 @@ async function boot() {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     const time = (now - t0) / 1000;
+    perf.frame(now);
 
     rts.update(dt);
     updateHover();
+    perf.mark('cam');
     state.update(dt);
     net?.frame(dt, state.lastHours);
     syncProtection();
     protectBanner.update();
+    perf.mark('state');
     units.update(state.lastHours);
+    perf.mark('units');
     const gameSec = state.lastHours * 3600;
     // Der Kampf rechnet je Frame höchstens 3 Spielsekunden: genau diese Rate muss die Effekt-Darstellung kennen
     effects.timeScale = dt > 0 ? Math.max(1, Math.min(gameSec, 3) / dt) : 1;
     if (!net || net.simulates) tactics.update(gameSec, dt);
+    perf.mark('tactics');
     combat.update(gameSec);
+    perf.mark('combat');
     abilities.update(state.lastHours);
     structures.update(state.lastHours, dt);
+    perf.mark('struct');
     if (state.playerA3) {
       economy.update(state.lastHours, dt);
       supply.update(state.lastHours, dt);
       production.update(state.lastHours, dt);
       if (!net || net.simulates) econAI.update(state.lastHours);
+      perf.mark('economy');
       const hold = missions.aiHeld();
       if (hold !== aiHeld) {
         aiHeld = hold;
         for (const a of ais) a.setEnabled(!hold);
       }
       for (const a of ais) a.update(state.lastHours, dt);
+      perf.mark('ai');
       fog.update(state.lastHours, dt);
+      perf.mark('fog');
       if (!net) missions.update(state.lastHours);
+      perf.mark('missions');
     }
     if (state.lastHours > 0) {
       civil.update(state.lastHours, dt, rts.camera);
@@ -468,19 +520,26 @@ async function boot() {
     } else {
       civil.update(0, dt, rts.camera);
     }
+    perf.mark('civil');
     ctl.update(dt);
+    perf.mark('ctl');
     terrain.update(rts.camera, time);
     water.update(rts.camera, time);
     cities.update(rts.camera);
     worldDetail.update(rts.camera, time);
     roads.update(rts.camera);
     bridges.update(rts.camera);
+    perf.mark('world');
     unitRenderer.update(rts.camera, time, state.playerA3);
+    perf.mark('unitRend');
     effects.update(dt, rts.camera, time, units.units);
     effects.shake.apply(rts.camera, dt);
     sfx.update(rts.camera);
+    perf.mark('effects');
     gfx.render(rts.camera, time);
+    perf.mark('render');
     labels.update(rts.camera, window.innerWidth, window.innerHeight);
+    perf.mark('labels');
     if (state.playerA3) {
       hud.update(dt);
       unitPanel.update(dt);
@@ -490,8 +549,13 @@ async function boot() {
       missionPanel.update(dt);
       tutorial.update(dt);
       tutorialOverlay.update(dt);
+    netStatus.update(dt);
+    chatBox.update(dt);
+      perf.mark('hud');
       minimap.update(rts.getGroundFootprint(), selectedId, playerId);
+      perf.mark('minimap');
     }
+    perfOverlay.update(dt);
     requestAnimationFrame(frame);
   };
 
@@ -511,7 +575,7 @@ async function boot() {
   }
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, economy, supply, production, fog, missions, ais, abilities, abilityBar, eventLog, menu, getNet: () => net };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, perf, perfOverlay, setQuality, Q, economy, supply, production, fog, missions, ais, abilities, abilityBar, eventLog, menu, getNet: () => net };
 }
 
 boot().catch((err: unknown) => {

@@ -146,6 +146,21 @@ export class Input {
       }
       if (b === 1) e.preventDefault(); // Autoscroll bei mittlerer Taste verhindern
     });
+    // Randscrollen auch über HUD-Leisten am Fensterrand (Kopfleiste oben, Reiter rechts): Zeiger im Randstreifen
+    // zählt als "im Canvas", solange kein Menü/Modal darunter liegt.
+    listenWin('pointermove', (e) => {
+      const t = e.target as HTMLElement | null;
+      if (!t || t === canvas || !t.closest || t.closest('.modal-backdrop, .main-menu, .camp-modal, .lb-modal, input, textarea')) return;
+      const r = canvas.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const band = 14;
+      if (mx < 0 || my < 0 || mx > r.width || my > r.height) return;
+      if (mx < band || my < band || mx > r.width - band || my > r.height - band) {
+        this.updatePos(e);
+        this.mouse.inside = true;
+        this.mouse.buttons = e.buttons;
+      } else this.mouse.inside = false;
+    });
     listen(canvas, 'pointermove', (e) => {
       this.updatePos(e);
       this.mouse.inside = true;

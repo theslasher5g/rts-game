@@ -1,3 +1,4 @@
+import { isSiteVisible } from '../fog/fogVis';
 import { bus } from '../core/EventBus';
 import type { OilEconomy } from '../logistics/OilEconomy';
 import { BASE_DEFS, BUILDABLE } from '../logistics/prices';
@@ -336,7 +337,7 @@ export class ProductionPanel {
     dyn.push({ k: 's_tr', text: `${fmt(pool.inTransit)} F` });
 
     // Ölfelder
-    const fields = [...economy.fields].sort((a, b) => (a.owner === player ? 0 : 1) - (b.owner === player ? 0 : 1) || a.id - b.id);
+    const fields = economy.fields.filter((f) => isSiteVisible(f.owner || '', f.x, f.z)).sort((a, b) => (a.owner === player ? 0 : 1) - (b.owner === player ? 0 : 1) || a.id - b.id);
     h += '<h4>Ölfelder</h4>';
     for (const f of fields) {
       const tag = this.fieldTag(f, player);

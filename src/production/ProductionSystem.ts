@@ -18,11 +18,14 @@ import { SiteLayer } from '../logistics/siteVisuals';
 import type { BaseInfo, BaseKind, ProductionOrderInfo } from '../logistics/types';
 
 export const MAX_QUEUE = 5;
+/** Weiche Obergrenze (Einheiten + Aufträge) je Nation: hält Simulation und Snapshots klein */
+export const UNIT_CAP = 150;
 
 export interface ProductionDeps {
   geo: GeoData;
   units: UnitManager;
   economy: OilEconomy;
+  /** (reserviert) – derzeit ohne Wirkung; Effizienz hängt nur von Ölpool und Basiszustand ab */
   cities?: Cities;
   settings: Settings;
 }
@@ -47,6 +50,8 @@ export class ProductionSystem {
   private exag: number;
   private nextOrderId = 1;
   private readonly started = new Set<number>();
+  /** Dauerhafter Sammelpunkt je Basis: neue Aufträge übernehmen ihn automatisch */
+  private readonly rallies = new Map<number, [number, number]>();
   private readonly spawnCount = new Map<number, number>();
   private readonly drawn = new Set<string>();
   private visClock = 0;
@@ -60,7 +65,15 @@ export class ProductionSystem {
     this.layer = new SiteLayer(deps.geo, this.exag, 'ProductionSites');
     this.object = this.layer.object;
     bus.on('base:destroyed', ({ baseId }) => {
-      for (const [id, o] of [...this.orders]) if (o.baseId === baseId) { this.orders.delete(id); this.started.delete(id); }
+      // Zerstörte Basis: Aufträge gehen verloren, die Hälfte des Preises wird erstattet (Fässer sind abgebucht)
+      for (const [id, o] of [...this.orders]) {
+        if (o.baseId !== baseId) continue;
+        this.orders.delete(id);
+        this.started.delete(id);
+        if (o.owner && !this.mirror) this.eco.refund(o.owner, (o.price ?? priceOf(o.typeId)) * 0.5);
+      }
+      this.rallies.delete(baseId);
+      this.spawnCount.delete(baseId);
       this.visDirty = true;
     });
     bus.on('base:built', () => { this.visDirty = true; });
@@ -93,7 +106,8 @@ export class ProductionSystem {
   /** Rate der Produktionseffizienz 0.6–1.0: Öl im Pool und Zustand der Basis */
   efficiency(b: BaseInfo): number {
     const pool = this.eco.pool(b.owner);
-    const oil = pool.barrels > 10 ? 1 : 0.6;
+    // weich: ab 30 Fässern volle Leistung, bei leerem Pool 0.6
+    const oil = pool.barrels >= 30 ? 1 : 0.6 + 0.4 * Math.max(0, pool.barrels) / 30;
     const hp = 0.7 + 0.3 * Math.max(0, Math.min(1, b.hp / b.hpMax));
     return Math.max(0.6, oil * hp);
   }
@@ -107,6 +121,10 @@ export class ProductionSystem {
     if (!(CATALOG[b.kind] ?? []).includes(typeId)) return { ok: false, reason: 'Hier nicht herstellbar' };
     if (this.queueOf(baseId).length >= MAX_QUEUE) return { ok: false, reason: `Warteschlange voll (${MAX_QUEUE})` };
     if (b.kind === 'shipyard' && !this.seaSpot(b.x, b.z, 25)) return { ok: false, reason: 'Kein Zugang zum Meer' };
+    let have = 0;
+    for (const u of this.units.units) if (u.owner === b.owner && u.hp > 0) have++;
+    for (const o of this.orders.values()) if (o.owner === b.owner) have++;
+    if (have >= UNIT_CAP) return { ok: false, reason: `Einheitenlimit erreicht (${UNIT_CAP})` };
     const price = priceOf(typeId);
     if (!this.eco.spend(b.owner, price, `produktion:${typeId}`)) {
       const have = Math.floor(this.eco.pool(b.owner).barrels);
@@ -114,7 +132,8 @@ export class ProductionSystem {
     }
     const hours = hoursOf(typeId);
     const o: ProductionOrderInfo = { id: this.nextOrderId++, baseId, typeId, remainingHours: hours, totalHours: hours, price, owner: b.owner };
-    if (rally) { o.rallyX = rally[0]; o.rallyZ = rally[1]; }
+    const rp = rally ?? this.rallies.get(baseId);
+    if (rp) { o.rallyX = rp[0]; o.rallyZ = rp[1]; }
     this.orders.set(o.id, o);
     this.promote(baseId);
     return { ok: true };
@@ -122,6 +141,7 @@ export class ProductionSystem {
 
   /** Sammelpunkt der Basis für alle (noch nicht fertigen) Aufträge setzen */
   setRally(baseId: number, x: number, z: number): void {
+    this.rallies.set(baseId, [x, z]);
     for (const o of this.orders.values()) if (o.baseId === baseId) { o.rallyX = x; o.rallyZ = z; }
   }
 
@@ -239,8 +259,8 @@ export class ProductionSystem {
       if (!s) { this.eco.refund(b.owner, o.price ?? priceOf(o.typeId)); bus.emit('toast', { msg: 'Werft: kein Seeweg, Auftrag erstattet', kind: 'warn' }); return; }
       x = s[0]; z = s[1];
     } else {
-      const a = n * 2.4, r = b.radiusKm * 0.35 + 0.05 * (n % 5);
-      x = b.x + Math.cos(a) * r; z = b.z + Math.sin(a) * r;
+      const p = this.freeSpot(b, n, t?.mobility.domain === 'air');
+      x = p[0]; z = p[1];
     }
     const u = this.units.spawn(o.typeId, b.owner, x, z, 0);
     if (!u) {
@@ -252,6 +272,23 @@ export class ProductionSystem {
     if (o.rallyX !== undefined && o.rallyZ !== undefined) this.units.issueMove([u.id], o.rallyX, o.rallyZ, {});
     bus.emit('production:complete', { baseId: b.id, typeId: o.typeId, owner: b.owner, unitId: u.id });
     this.promote(b.id);
+  }
+
+  /** Freier Ausgangspunkt am Basisrand: Land, nicht auf einer anderen Einheit (Flugzeuge stehen am Boden des Flugplatzes) */
+  private freeSpot(b: BaseInfo, n: number, air: boolean): [number, number] {
+    const buf: import('../units/types').Unit[] = [];
+    let fx = b.x, fz = b.z;
+    for (let k = 0; k < 24; k++) {
+      const a = n * 2.4 + k * 0.9;
+      const r = b.radiusKm * 0.35 + 0.05 * ((n + k) % 5) + 0.02 * Math.floor(k / 4);
+      const x = b.x + Math.cos(a) * r, z = b.z + Math.sin(a) * r;
+      if (k === 0) { fx = x; fz = z; }
+      if (!air && !snapToTerrain(this.geo, x, z).land) continue;
+      this.units.queryRadius(x, z, air ? 0.06 : 0.025, buf);
+      if (buf.some((u) => u.hp > 0 && (air ? u.type.mobility.domain === 'air' && !u.airborne : u.type.mobility.domain !== 'air'))) continue;
+      return [x, z];
+    }
+    return [fx, fz];
   }
 
   /** Nächste Meereszelle um (x,z) bis maxKm */

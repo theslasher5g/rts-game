@@ -29,41 +29,47 @@ export function modelKeyFor(model: string, typeId: string, owner: string): strin
   return model;
 }
 
+/** Bauanleitung je Modellschlüssel (lazy: UnitRenderer baut ein Modell erst bei Bedarf bzw. im Leerlauf) */
+export const MODEL_BUILDERS: Record<string, () => ModelDef> = {
+  // Kampfpanzer: Standard = Abrams-Profil, @w = Leopard-2-Profil, @r = T-90-Profil
+  mbt: () => buildMbt('abrams', false),
+  'mbt@w': () => buildMbt('west', false),
+  'mbt@r': () => buildMbt('ru', false),
+  mbt_heavy: () => buildMbt('abrams', true),
+  'mbt_heavy@w': () => buildMbt('west', true),
+  'mbt_heavy@r': () => buildMbt('ru', true),
+  light_tank: () => buildLightTank(),
+  ifv: () => buildIfv('abrams'),
+  'ifv@w': () => buildIfv('west'),
+  'ifv@r': () => buildIfv('ru'),
+  recon_4x4: () => buildRecon4x4(),
+  recon_8x8: () => buildApc8x8(),
+  spg: () => buildSpg(),
+  mlrs: () => buildMlrs(),
+  spaa: () => buildSpaa(),
+  sam: () => buildSam(),
+  truck: () => buildTruck(),
+  aid_truck: () => buildAidTruck(),
+  fuel_truck: () => buildFuelTruck(),
+  field_hospital: () => buildFieldHospital(),
+  ambulance: () => buildAmbulance(),
+  soldier: () => buildSoldier('inf'),
+  ...Object.fromEntries(Object.entries(SOLDIER_KIND).map(([id, kind]) => [`soldier:${id}`, () => buildSoldier(kind)])),
+  heli_attack: () => buildHeliAttack(),
+  heli_transport: () => buildHeliTransport(),
+  jet: () => buildJet(),
+  bomber: () => buildBomber(),
+  drone_fixed: () => buildDroneFixed(),
+  drone_quad: () => buildDroneQuad(),
+  destroyer: () => buildDestroyer(),
+  frigate: () => buildFrigate(),
+  submarine: () => buildSubmarine(),
+};
+
+/** Alle Modelle sofort bauen (Tests/Werkzeuge) */
 export function buildModels(): Record<string, ModelDef> {
   const M: Record<string, ModelDef> = {};
-  // Kampfpanzer: Standard = Abrams-Profil, @w = Leopard-2-Profil, @r = T-90-Profil
-  M.mbt = buildMbt('abrams', false);
-  M['mbt@w'] = buildMbt('west', false);
-  M['mbt@r'] = buildMbt('ru', false);
-  M.mbt_heavy = buildMbt('abrams', true);
-  M['mbt_heavy@w'] = buildMbt('west', true);
-  M['mbt_heavy@r'] = buildMbt('ru', true);
-  M.light_tank = buildLightTank();
-  M.ifv = buildIfv('abrams');
-  M['ifv@w'] = buildIfv('west');
-  M['ifv@r'] = buildIfv('ru');
-  M.recon_4x4 = buildRecon4x4();
-  M.recon_8x8 = buildApc8x8();
-  M.spg = buildSpg();
-  M.mlrs = buildMlrs();
-  M.spaa = buildSpaa();
-  M.sam = buildSam();
-  M.truck = buildTruck();
-  M.aid_truck = buildAidTruck();
-  M.fuel_truck = buildFuelTruck();
-  M.field_hospital = buildFieldHospital();
-  M.ambulance = buildAmbulance();
-  M.soldier = buildSoldier('inf');
-  for (const [id, kind] of Object.entries(SOLDIER_KIND)) M[`soldier:${id}`] = buildSoldier(kind);
-  M.heli_attack = buildHeliAttack();
-  M.heli_transport = buildHeliTransport();
-  M.jet = buildJet();
-  M.bomber = buildBomber();
-  M.drone_fixed = buildDroneFixed();
-  M.drone_quad = buildDroneQuad();
-  M.destroyer = buildDestroyer();
-  M.frigate = buildFrigate();
-  M.submarine = buildSubmarine();
+  for (const [k, f] of Object.entries(MODEL_BUILDERS)) M[k] = f();
   return M;
 }
 

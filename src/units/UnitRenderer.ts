@@ -17,7 +17,8 @@ import type { Unit, UnitTypeDef } from './types';
 import type { UnitManager } from './UnitManager';
 import { UNIT_TYPES } from './unitTypes';
 import { SCALE, counterDistanceKm, unitModelScale } from '../core/scale';
-import { buildModels, modelKeyFor, rotorGeometry, type ModelDef as ModelDefT } from './models';
+import { MODEL_BUILDERS, modelKeyFor, rotorGeometry, type ModelDef as ModelDefT } from './models';
+import { Q } from '../core/quality';
 
 // ---------------------------------------------------------------- Tuning
 /**
@@ -431,7 +432,7 @@ void main() {
 /** Nationen-ID für Tarnmuster (Soldaten-Material): 1 VAL alpin, 2 KRN khaki/braun, 3 MAR sand/oliv, 4 Wüste, 5 Wald (Rückfall) */
 const NATION_ID: Record<string, number> = { VAL: 1, KRN: 2, MAR: 3 };
 /** Kameraabstand (km), ab dem Soldaten in der Low-Detail-Variante gezeichnet werden */
-const SOLDIER_LOD_KM = 3.5;
+// Soldaten-LOD: Q.soldierLodKm (hoch = 3.5 km)
 
 const ANIM_COMMON = /* glsl */ `
 vec3 S(float r, float g, float b) { return pow(vec3(r, g, b) / 255.0, vec3(2.2)) * 1.6; }
@@ -596,9 +597,9 @@ vec3 camoTint(vec3 p, float nat, vec3 base) {
 // ---------------------------------------------------------------- Fahrzeug-Material (Bodenfahrzeuge)
 
 /** Kameraabstand (km), ab dem Fahrzeuge in der Low-Detail-Variante gezeichnet werden */
-const VEH_LOD_KM = 6;
+// Fahrzeug-LOD: Q.vehLodKm (hoch = 6 km)
 /** Ab diesem Kameraabstand (km) werden Fahrzeug-Animationen nicht mehr fortgeschrieben */
-const VEH_ANIM_KM = 5;
+// Fahrzeug-Animation: Q.vehAnimKm (hoch = 5 km)
 
 const VEH_VERT_DECL = /* glsl */ `
 attribute float aPaint;
@@ -755,7 +756,8 @@ export class UnitRenderer {
   private readonly manager: UnitManager;
   private readonly geo: GeoData;
   private exag: number;
-  private readonly models: Record<string, ModelDef>;
+  /** Modelle werden lazy gebaut (ensureModel) und im Leerlauf vorgewärmt */
+  private readonly models: Record<string, ModelDef> = {};
   private readonly slots = new Map<string, ModelSlot>();
   private readonly rotorSlot: ModelSlot;
   private readonly material: THREE.MeshLambertMaterial;
@@ -853,19 +855,8 @@ export class UnitRenderer {
       if (vv) vv.rec[vv.fireIdx++ % vv.nm] = 0;
     });
 
-    this.models = buildModels();
-    for (const key of Object.keys(this.models)) {
-      const slot = this.makeSlot(this.models[key], 16);
-      this.slots.set(key, slot);
-      group.add(slot.mesh);
-      const lod = this.models[key].lod;
-      if (lod) {
-        const lo = this.makeSlot(lod, 16);
-        this.slots.set(`${key}#lo`, lo);
-        this.loKeys.set(key, `${key}#lo`);
-        group.add(lo.mesh);
-      }
-    }
+    // Modelle: lazy (erste Einheit dieses Typs/Besitzers) + Vorwärmen im Leerlauf (Menü), statt ~0,4 s beim Start
+    this.warmup(Object.keys(MODEL_BUILDERS));
     this.rotorSlot = this.makeSlot({ geom: rotorGeometry(), size: 1, boost: 1, livery: 'air', tilt: false }, 16);
     group.add(this.rotorSlot.mesh);
 
@@ -982,6 +973,13 @@ export class UnitRenderer {
     return SCALE.units;
   }
 
+  /** Summe der aktuell gezeichneten Modell-Instanzen (Performance-Overlay) */
+  get instanceTotal(): number {
+    let n = 0;
+    for (const slot of this.slots.values()) n += slot.count;
+    return n;
+  }
+
   /** true = Fernansicht mit NATO-Zeichen */
   get showingCounters(): boolean {
     return this.counterMode;
@@ -1003,8 +1001,8 @@ export class UnitRenderer {
     const gy = Math.max(0, this.geo.heightAt(_cam.x, _cam.z)) * this.exag;
     const dist = _dir.y < -0.05 ? Math.max(0.5, (_cam.y - gy * 0.5) / -_dir.y) : Math.max(0.5, _cam.y);
     this.camDist = dist;
-    this.lowLod = dist > SOLDIER_LOD_KM * (this.lowLod ? 0.9 : 1.1);
-    this.lowLodVeh = dist > VEH_LOD_KM * (this.lowLodVeh ? 0.9 : 1.1);
+    this.lowLod = dist > Q.soldierLodKm * (this.lowLod ? 0.9 : 1.1);
+    this.lowLodVeh = dist > Q.vehLodKm * (this.lowLodVeh ? 0.9 : 1.1);
     this.animTime.value = timeSec % 1024;
     const screenW = window.innerWidth || 1, screenH = window.innerHeight || 1;
     this.counterDist = counterDistanceKm(screenH, camera.fov);
@@ -1141,8 +1139,41 @@ export class UnitRenderer {
     let m = this.keyCache.get(u.type);
     if (!m) this.keyCache.set(u.type, (m = new Map()));
     let k = m.get(u.owner);
-    if (k === undefined) m.set(u.owner, (k = modelKeyFor(u.type.model, u.type.id, u.owner)));
+    if (k === undefined) {
+      m.set(u.owner, (k = modelKeyFor(u.type.model, u.type.id, u.owner)));
+      this.ensureModel(k);
+    }
     return k;
+  }
+
+  /** Modell + Slots (Hoch-/Niedrig-Detail) bei Bedarf bauen */
+  private ensureModel(key: string): void {
+    if (this.models[key]) return;
+    const build = MODEL_BUILDERS[key];
+    if (!build) return;
+    const def = build();
+    this.models[key] = def;
+    const slot = this.makeSlot(def, 16);
+    this.slots.set(key, slot);
+    this.object.add(slot.mesh);
+    if (def.lod) {
+      const lo = this.makeSlot(def.lod, 16);
+      this.slots.set(`${key}#lo`, lo);
+      this.loKeys.set(key, `${key}#lo`);
+      this.object.add(lo.mesh);
+    }
+  }
+
+  /** Restliche Modelle nacheinander im Leerlauf bauen (je Aufruf ein Modell, damit kein langer Frame entsteht) */
+  private warmup(keys: string[]): void {
+    let i = 0;
+    const step = () => {
+      while (i < keys.length && this.models[keys[i]]) i++;
+      if (i >= keys.length) return;
+      this.ensureModel(keys[i++]);
+      window.setTimeout(step, 30);
+    };
+    window.setTimeout(step, 400);
   }
 
   /** Slot-Schlüssel inkl. Low-Detail-Variante (ab SOLDIER_LOD_KM Kameraabstand) */
@@ -1406,7 +1437,7 @@ export class UnitRenderer {
     w.lz = u.z;
     const d = Math.hypot(dx, dz);
     if (d < 0.5 && d > 1e-7) w.odoT += ((dx * Math.sin(u.heading) - dz * Math.cos(u.heading) >= 0 ? 1 : -1) * d) / kmPerM;
-    if (this.camDist > VEH_ANIM_KM) {
+    if (this.camDist > Q.vehAnimKm) {
       w.odo = w.odoT;
       w.wobP = w.wobR = w.bobY = 0;
       return w;

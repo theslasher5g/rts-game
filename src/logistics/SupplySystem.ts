@@ -64,6 +64,11 @@ export function ammoFrac(u: Unit): number {
 
 const _buf: Unit[] = [];
 
+/** Reparatur in eigenen Versorgungsbasen: Anteil der Max-HP je Spielstunde, wenn die Einheit nicht unter Feuer steht */
+export const BASE_REPAIR_PER_HOUR = 0.06;
+/** Spielstunden ohne Treffer, bevor die Reparatur einsetzt (6 Minuten) */
+const REPAIR_CALM_H = 0.1;
+
 export class SupplySystem {
   readonly stats = { low: 0, out: 0, depots: 0 };
 
@@ -77,6 +82,7 @@ export class SupplySystem {
   private readonly seen = new Set<number>();
   private readonly unreachable = new Map<string, number>();
   private readonly pending = new Map<string, number>();
+  private readonly lastHit = new Map<number, number>();
   private time = 0;
   private clock = 0;
   private dispatchClock = 0;
@@ -87,7 +93,8 @@ export class SupplySystem {
     this.eco = deps.economy;
     this.path = deps.pathfinder;
     this.getPlayer = deps.getPlayer;
-    bus.on('unit:removed', ({ id }) => { this.trucks.delete(id); this.warned.delete(id); this.seen.delete(id); });
+    bus.on('unit:removed', ({ id }) => { this.trucks.delete(id); this.warned.delete(id); this.seen.delete(id); this.lastHit.delete(id); });
+    bus.on('unit:damaged', ({ id, amount }) => { if (amount > 0 && !this.mirror) this.lastHit.set(id, this.time); });
   }
 
   setAutoResupply(owner: string, on: boolean): void {
@@ -159,6 +166,7 @@ export class SupplySystem {
     if (dt > 0) {
       this.time += dt;
       this.depotRefill(dt);
+      this.repairInBases(dt);
       this.tickTrucks(dt);
       this.moraleAndWarn(dt);
       this.dispatchClock += realDt;
@@ -234,6 +242,23 @@ export class SupplySystem {
     }
   }
 
+  /** Beschädigte Fahrzeuge regenerieren langsam in eigenen Depots/HQ/Raffinerien/Flugplätzen/Werften (nur wenn sie ruhig stehen) */
+  private repairInBases(dt: number): void {
+    const done = new Set<number>();
+    for (const b of this.supplyBases()) {
+      this.units.queryRadius(b.x, b.z, b.radiusKm, _buf);
+      for (const u of _buf) {
+        if (u.owner !== b.owner || u.hp <= 0 || u.hp >= u.type.hp || done.has(u.id) || u.garrisonId !== undefined) continue;
+        const cat = u.type.category;
+        if (cat === 'infantry' || cat === 'drone' || u.speedKmh > 3) continue;
+        const hit = this.lastHit.get(u.id);
+        if (hit !== undefined && this.time - hit < REPAIR_CALM_H) continue;
+        u.hp = Math.min(u.type.hp, u.hp + u.type.hp * BASE_REPAIR_PER_HOUR * dt);
+        done.add(u.id);
+      }
+    }
+  }
+
   // ------------------------------------------------------------------ Moral / Warnungen
 
   private warn(u: Unit, what: 'fuel' | 'ammo'): void {
@@ -269,7 +294,7 @@ export class SupplySystem {
   }
 
   private routeOk(fx: number, fz: number, tx: number, tz: number): boolean {
-    return this.path.findRoute(fx, fz, tx, tz, this.truckMob()) !== null;
+    return this.path.routeExists ? this.path.routeExists(fx, fz, tx, tz, this.truckMob()) : this.path.findRoute(fx, fz, tx, tz, this.truckMob()) !== null;
   }
 
   private send(u: Unit, x: number, z: number): void {

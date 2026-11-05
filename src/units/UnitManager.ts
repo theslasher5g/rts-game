@@ -169,6 +169,19 @@ export class UnitManager {
     return this.borderFriendly ? this.borderFriendly(u.owner, a3) : false;
   }
 
+  /** Grenzschutz: darf `owner` bei geschlossener Grenze den Punkt (x,z) betreten? (für KI-Befehlsfilter) */
+  borderAllows(owner: string, x: number, z: number): boolean {
+    if (!this.borderClosed) return true;
+    const cid = this.geo.countryAt(x, z);
+    if (cid === 0) return true;
+    const a3 = this.geo.countriesById.get(cid)?.a3;
+    if (!a3 || a3 === owner) return true;
+    return this.borderFriendly ? this.borderFriendly(owner, a3) : false;
+  }
+
+  /** Nur Einheiten dieser Besitzer lösen den Grenz-Hinweis aus (null = alle); von main.ts gesetzt */
+  borderToastFor: ((owner: string) => boolean) | null = null;
+
   /** Phase 4: Bremsfaktor durch Flüchtlingsströme auf Straßen (1 = frei, bis 0.3); von main.ts gesetzt */
   roadSpeedFactor: ((x: number, z: number) => number) | null = null;
 
@@ -286,7 +299,10 @@ export class UnitManager {
   /** Gast: Einheit mit vorgegebener ID anlegen (kein Routing, keine ID-Vergabe, kein Einrasten auf Gelände). */
   spawnRemote(id: number, typeId: string, owner: string, x: number, z: number, heading = 0, name?: string): Unit | null {
     const existing = this.byId.get(id);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.type.id === typeId && existing.owner === owner) return existing;
+      this.remove(id); // veraltete lokale Einheit mit kollidierender ID ersetzen
+    }
     const type = getUnitType(typeId);
     if (!type) return null;
     const u: Unit = {
@@ -760,7 +776,9 @@ export class UnitManager {
     const f = sl > 1e-9 ? t / sl : 1;
     const nx = pts[seg * 2] + (pts[seg * 2 + 2] - pts[seg * 2]) * f;
     const nz = pts[seg * 2 + 1] + (pts[seg * 2 + 3] - pts[seg * 2 + 1]) * f;
-    if (this.borderClosed && !this.borderOk(u, nx, nz)) {
+    // Eingeschlossene Einheiten (z. B. in fremdem Gebiet produziert/gespawnt) dürfen im selben Land weiterfahren,
+    // damit sie die Grenze Richtung Heimat überqueren können; ein drittes Land bleibt gesperrt.
+    if (this.borderClosed && !this.borderOk(u, nx, nz) && !(!this.borderOk(u, u.x, u.z) && this.geo.countryAt(u.x, u.z) === this.geo.countryAt(nx, nz))) {
       // Grenzschutz: an der Grenze anhalten, Befehle verwerfen
       u.orders.length = 0;
       u.route = null;
@@ -770,7 +788,7 @@ export class UnitManager {
       u.speedKmh = 0;
       u.onRoad = false;
       const now = performance.now();
-      if (now - this.borderToastAt > 4000) {
+      if (now - this.borderToastAt > 4000 && (!this.borderToastFor || this.borderToastFor(u.owner))) {
         this.borderToastAt = now;
         bus.emit('toast', { msg: 'Grenze gesperrt – während des Grenzschutzes darf kein fremdes Gebiet betreten werden', kind: 'warn' });
       }

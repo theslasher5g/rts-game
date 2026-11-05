@@ -355,9 +355,12 @@ export function installHostCommandHandler(
       case 'abilities.use': {
         if (!targets.abilities) return 'keine Fähigkeiten';
         if (opts.abilityArgs) { const r = opts.abilityArgs(nation, a); return r ?? 'Fähigkeit'; }
-        if (a.length === 0 || a.length > 6) return 'Argumente';
-        for (const v of a) if (!(typeof v === 'string' || isNum(v) || typeof v === 'boolean' || v === null || v === undefined)) return 'Argumente';
-        return a;
+        // AbilitySystem.use(a3, id, x, z): die Nation wird IMMER durch die des Absenders ersetzt (kein Fremdeinsatz)
+        const id = a[1];
+        if (a.length !== 4 || typeof id !== 'string' || id.length > 30 || !isNum(a[2]) || !isNum(a[3])) return 'Argumente';
+        const defFn = (targets.abilities as unknown as { def?: (id: string) => { damaging?: boolean } | undefined }).def;
+        if (ctx.war.ceasefire && defFn?.call(targets.abilities, id)?.damaging) return 'Grenzschutz';
+        return [nation, id, clampN(a[2], 0, W), clampN(a[3], 0, H)];
       }
       default:
         return 'unbekannt';

@@ -105,9 +105,9 @@
 /* ---------- EventLog (Funkprotokoll), unten rechts über dem Infopanel ---------- */
 .evl {
   position: absolute;
-  right: 40px;
+  right: 30px;
   bottom: 190px;
-  width: 262px;
+  width: 240px;
   z-index: 3;
   display: flex;
   flex-direction: column;

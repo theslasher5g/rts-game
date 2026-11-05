@@ -15,6 +15,7 @@ import { generateInfra, cityRadiusKm, rngFrom } from './infra';
 import { terrainHeightKm } from '../world/Cities';
 import { buildCivilGeometries, BUS_COLORS, CAR_COLORS, CLOTH_COLORS, INFRA_HEIGHT_M, INFRA_KINDS, TRUCK_COLORS, type VehicleModel } from './CivilModels';
 import { SCALE } from '../core/scale';
+import { Q } from '../core/quality';
 
 /** Wegfindung (strukturell = Pathfinder) */
 export interface RouteLike {
@@ -34,11 +35,10 @@ export interface CivilianDeps {
 
 /** Modellsichtbarkeit (Kameraabstand km) */
 // Kleine Karte (300 × 200 km): Gesamtansicht ≈ 320 km Abstand – dort keine Symbole, sie erscheinen erst beim Heranzoomen
-const INFRA_MODEL_MAX = 40;
+// INFRA_MODEL_MAX: Q.civilInfraKm (hoch = 40); AMBIENT_MAX: Q.civilAmbient (hoch = 14)
 const INFRA_ICON_MIN = 40;
 const INFRA_ICON_MAX = 70;
 const EMBLEM_MAX = 70;
-const AMBIENT_MAX = 14;
 const PED_MAX_DIST = 4;
 const FLOW_LINE_MIN = 10;
 const FLOW_LINE_MAX = 900;
@@ -1325,7 +1325,8 @@ export class CivilianSystem {
     const seen = new Set<number>();
     for (const u of this.units.units) {
       const id = u.type.id;
-      const isAid = id === 'aid_convoy' || id === 'supply_truck';
+      // Nur Hilfskonvois liefern Hilfe; Versorgungs-LKW behalten ihre Fracht (u.ammo) für das SupplySystem
+      const isAid = id === 'aid_convoy';
       const isMedic = id === 'medic_team';
       if (!isAid && !isMedic) continue;
       if (u.speedKmh > 1) { this.carriers.delete(u.id); continue; }
@@ -1336,7 +1337,7 @@ export class CivilianSystem {
       seen.add(u.id);
       let st = this.carriers.get(u.id);
       if (!st || st.cityId !== c.id) {
-        st = { cityId: c.id, dwellH: 0, consumeH: 0, cargo: u.ammo > 0 ? u.ammo : id === 'supply_truck' ? 20 : 0 };
+        st = { cityId: c.id, dwellH: 0, consumeH: 0, cargo: u.ammo > 0 ? u.ammo : 0 };
         this.carriers.set(u.id, st);
       }
       st.dwellH += dtH;
@@ -1393,7 +1394,7 @@ export class CivilianSystem {
     const showInfra = this.show;
     // --- Infrastruktur-Modelle / Icons / Embleme
     const s = SCALE.infra;
-    const models = showInfra && dist < INFRA_MODEL_MAX;
+    const models = showInfra && dist < Q.civilInfraKm;
     const icons = showInfra && dist >= INFRA_ICON_MIN && dist <= INFRA_ICON_MAX;
     const emblems = showInfra && dist <= EMBLEM_MAX;
     for (const k of INFRA_KINDS) this.infraMeshes[k].visible = models;
@@ -1415,7 +1416,7 @@ export class CivilianSystem {
 
     // --- Fahrzeuge / Fußgänger
     for (const k of Object.keys(this.vehCount) as VehicleModel[]) this.vehCount[k] = 0;
-    if (this.show && dist < AMBIENT_MAX) {
+    if (this.show && dist < Q.civilAmbient) {
       const vs = SCALE.infra;
       this.renderAmbient(vs, dist, dtH);
       if (dist < PED_MAX_DIST) this.renderPeds(Math.min(vs, 14), dist);
@@ -1540,7 +1541,7 @@ export class CivilianSystem {
   }
 
   private refreshAmbient(dist: number): void {
-    const R = Math.min(AMBIENT_MAX, Math.max(5, dist * 2.2));
+    const R = Math.min(Q.civilAmbient, Math.max(Math.min(5, Q.civilAmbient), dist * 2.2));
     const fx = this.camFocusX, fz = this.camFocusZ;
     const out: number[] = [];
     this.graph.edgesInRect(fx - R, fz - R, fx + R, fz + R, out);
@@ -1593,7 +1594,7 @@ export class CivilianSystem {
     const lane = 0.0014 * SCALE.roadWidth;
     const lift = 0.0008 * vs;
     const t = this.visTime;
-    const R = Math.min(AMBIENT_MAX, Math.max(5, dist * 2.2));
+    const R = Math.min(Q.civilAmbient, Math.max(Math.min(5, Q.civilAmbient), dist * 2.2));
     for (const a of this.ambient) {
       const e = this.graph.edges[a.e];
       if (!e.open) continue;

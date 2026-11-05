@@ -10,6 +10,8 @@
  *   Höhe in Welt-Y = höheKm * settings.heightExaggeration  (Meer: Wasserfläche bei y = 0).
  */
 
+import type { QualityLevel } from './quality';
+
 export interface CountryMeta {
   /** 1..249, entspricht Rot-Kanal in countries.png */
   id: number;
@@ -106,6 +108,10 @@ export interface Settings {
   showRoads: boolean;
   /** Phase 6: Nebel des Krieges (optional, Standard an) */
   fogOfWar?: boolean;
+  /** Grafikqualität (Preset, siehe core/quality.ts) */
+  quality: QualityLevel;
+  /** FPS-/Performance-Overlay anzeigen (Strg+Umschalt+P) */
+  showFps: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -120,6 +126,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showCities: true,
   showRoads: true,
   fogOfWar: true,
+  quality: 'mittel',
+  showFps: false,
 };
 
 /** Ergebnis eines Kartenpicks (Maus -> Welt) */
@@ -149,8 +157,8 @@ export interface GameEvents {
   // Phase 3 – Kampf (alle Positionen: Welt-km x,z + Welt-Y y)
   /** Waffe wurde abgefeuert. flightSec = Flugzeit bis zum Einschlag (0 = Hitscan/Tracer sofort) */
   'combat:fire': { unitId: number; weapon: import('../combat/types').WeaponKind; fx: number; fy: number; fz: number; tx: number; ty: number; tz: number; flightSec: number; indirect: boolean };
-  'combat:impact': { weapon: import('../combat/types').WeaponKind; x: number; y: number; z: number; surface: import('../combat/types').ImpactSurface; radiusKm: number };
-  'combat:explosion': { x: number; y: number; z: number; size: import('../combat/types').ExplosionSize; fire: boolean };
+  'combat:impact': { weapon: import('../combat/types').WeaponKind; x: number; y: number; z: number; surface: import('../combat/types').ImpactSurface; radiusKm: number; /** Besitzer des Schützen; Basen/Felder/Zivilsystem ignorieren Einschläge befreundeter Seiten */ owner?: string };
+  'combat:explosion': { x: number; y: number; z: number; size: import('../combat/types').ExplosionSize; fire: boolean; owner?: string };
   'unit:damaged': { id: number; amount: number; hp: number; attackerId: number; suppression: number };
   'unit:killed': { id: number; typeId: string; category: string; owner: string; x: number; y: number; z: number; heading: number; killerId: number; cause: string };
   /** Wrack entsteht (Fahrzeug zerstört) */
@@ -201,7 +209,9 @@ export interface GameEvents {
   'tutorial:step': { index: number; total: number; text: string };
   'fog:revealed': { a3: string; cells: number };
   // Phase 7 – Mehrspieler, Fähigkeiten, Meldungen
-  'net:state': { role: 'host' | 'guest' | 'offline'; connected: boolean };
+  'net:state': { role: 'host' | 'guest' | 'offline'; connected: boolean; /** Grund bei Trennung (Gast: 'Host getrennt') */ reason?: string };
+  /** Host: Ein menschlicher Mitspieler hat das Spiel verlassen; main.ts übergibt die Nation an einen AICommander */
+  'net:peer-left': { a3: string; peerId: string };
   'ability:used': { id: string; a3: string; x: number; z: number };
   /** Lagemeldung (Funkspruch): erscheint im Ereignisprotokoll, optional mit Kartenposition zum Anspringen */
   'alert': { a3: string; kind: 'info' | 'warn' | 'danger'; text: string; x?: number; z?: number };

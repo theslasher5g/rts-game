@@ -95,4 +95,6 @@ export interface StructureInfo {
 /** Kriegsbeteiligung. Implementierung: src/game/War.ts */
 export interface WarQuery {
   isHostile(a: string, b: string): boolean;
+  /** Grenzschutz: solange true, wird nicht gekämpft (auch keine Flächenfeuerbefehle) */
+  ceasefire?: boolean;
 }

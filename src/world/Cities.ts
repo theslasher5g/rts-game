@@ -9,6 +9,7 @@ import {
 } from './BuildingModels';
 import { SCALE } from '../core/scale';
 import { BuildingFires, DecalSet, DECAL, StreetLife, setDecalParams, setPropParams, type StreetGrid } from './StreetProps';
+import { Q } from '../core/quality';
 
 export { BT, BT_COUNT, getBuildingMaterial, rngFrom, terrainHeightKm };
 export type { BuildingMaterial };
@@ -18,9 +19,9 @@ const HIDE_DISTANCE = 2500;
 /** Ab dieser Kamerahöhe werden auch die Marker ausgeblendet */
 const MARKER_MAX_DISTANCE = 9000;
 /** Kachel-Abstand (km) bis zu dem die detaillierten Gebäudemodelle gezeichnet werden */
-const LOD0_DIST = 36;
+// (Standard 'hoch' 36 km – Laufzeitwert: Q.cityDetailKm)
 /** Kachel-Abstand (km) bis zu dem die einfachen Quader gezeichnet werden */
-const LOD1_DIST = 1800;
+// (Standard 'hoch' 1800 km – Laufzeitwert: Q.cityFarKm)
 /** Kachelgröße (km) für Culling/LOD */
 const TILE_KM = 6;
 
@@ -319,7 +320,7 @@ export class BuildingLayer {
   }
 
   /** LOD je Kachel nach Kameraabstand (nur Detailgrad, nie die Größe). */
-  update(cam: THREE.Vector3, enabled: boolean, lod0 = LOD0_DIST, lod1 = LOD1_DIST): void {
+  update(cam: THREE.Vector3, enabled: boolean, lod0 = Q.cityDetailKm, lod1 = Q.cityFarKm): void {
     this.flush();
     for (const t of this.tiles) {
       let lod = -1;

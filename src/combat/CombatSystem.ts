@@ -328,6 +328,10 @@ export class CombatSystem {
 
   orderFireAt(unitIds: number[], x: number, z: number): void {
     let warned = false;
+    if (this.war.ceasefire) {
+      if (unitIds.length) bus.emit('toast', { msg: 'Grenzschutz läuft – Feuerbefehle sind gesperrt', kind: 'warn' });
+      return;
+    }
     for (const id of unitIds) {
       const u = this.units.get(id);
       if (!u || u.hp <= 0) continue;
@@ -1404,9 +1408,9 @@ export class CombatSystem {
     }
     // Airburst (Flak/SAM) in der Luft
     const airburst = w.targets.includes('air') && !w.targets.includes('ground') && !(hit && t) ;
-    bus.emit('combat:impact', { weapon: w.kind, x, y, z, surface: airburst ? 'ground' : surface, radiusKm: Math.max(w.splashKm, 0.004) });
-    if (w.splashKm > 0.025 || w.kind === 'bomb') bus.emit('combat:explosion', { x, y, z, size: this.explSize(w), fire: w.damage >= 80 });
-    else if (airburst || w.splashKm > 0.012) bus.emit('combat:explosion', { x, y, z, size: 'tiny', fire: false });
+    bus.emit('combat:impact', { weapon: w.kind, x, y, z, surface: airburst ? 'ground' : surface, radiusKm: Math.max(w.splashKm, 0.004), owner });
+    if (w.splashKm > 0.025 || w.kind === 'bomb') bus.emit('combat:explosion', { x, y, z, size: this.explSize(w), fire: w.damage >= 80, owner });
+    else if (airburst || w.splashKm > 0.012) bus.emit('combat:explosion', { x, y, z, size: 'tiny', fire: false, owner });
     if (w.splashKm > 0 || w.suppression > 0.05) this.splash(w, attackerId, owner, x, z, excludeId, attacker);
   }
 
@@ -1501,6 +1505,7 @@ export class CombatSystem {
         for (let i = 0; i < ss.length; i++) {
           const s = ss[i];
           if (s.hp <= 0) continue;
+          if (s.owner && !this.hostile(owner, s.owner)) continue; // Streuschaden verschont eigene/verbündete Bauwerke
           this.structures.damageStructure(s.id, w.damage * (w.buildingMul ?? 0.3) * 0.8);
         }
       }
@@ -1514,6 +1519,8 @@ export class CombatSystem {
     const st = this.stateOf(t);
     if (st.dead) return;
     const maxHp = t.type.hp;
+    // Veteranen stecken etwas besser weg (Erfahrung 0.3 = neutral, 1.0 = -8 % Schaden; Treffsicherheit: siehe exp-Faktor der Waffen)
+    if (dmg > 0) dmg *= 1 - 0.12 * (t.experience - 0.3);
     if (dmg > 0) {
       dmg = Math.min(dmg, t.hp);
       t.hp -= dmg;
@@ -1553,12 +1560,12 @@ export class CombatSystem {
     const vehicle = !soft && cat !== 'drone';
     if (vehicle || expended) {
       const size: ExplosionSize = cat === 'naval' ? 'huge' : cat === 'tank' || cat === 'jet' || cat === 'helicopter' || cat === 'artillery' ? 'large' : cat === 'drone' ? 'tiny' : 'medium';
-      bus.emit('combat:explosion', { x: u.x, y: u.y, z: u.z, size: expended ? 'small' : size, fire: !expended });
+      bus.emit('combat:explosion', { x: u.x, y: u.y, z: u.z, size: expended ? 'small' : size, fire: !expended, owner: u.owner });
     }
     if (vehicle && !expended) {
       bus.emit('wreck:spawn', { x: u.x, y: u.y, z: u.z, heading: u.heading, category: cat, typeId: u.type.id, owner: u.owner });
       if (u.ammo > 0.5 && cat !== 'naval' && this.rand() < B.COOKOFF_CHANCE && this.splashDepth < 2) {
-        bus.emit('combat:explosion', { x: u.x, y: u.y, z: u.z, size: 'large', fire: true });
+        bus.emit('combat:explosion', { x: u.x, y: u.y, z: u.z, size: 'large', fire: true, owner: u.owner });
         this.splash(COOKOFF, u.id, u.owner, u.x, u.z, u.id, undefined);
       }
     }

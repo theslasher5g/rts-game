@@ -15,7 +15,7 @@ export class ProtectBanner {
     this.el.style.cssText =
       'position:absolute;top:44px;left:50%;transform:translateX(-50%);z-index:20;display:none;pointer-events:none;' +
       "font:12px/1.2 'Share Tech Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#f0d98a;" +
-      'background:rgba(30,32,22,.88);border:1px solid #b89a3c;padding:5px 14px;box-shadow:0 2px 10px rgba(0,0,0,.5);';
+      'background:rgba(30,32,22,.88);border:1px solid #b89a3c;padding:5px 14px;text-align:center;max-width:max(300px,calc(100vw - 660px));box-shadow:0 2px 10px rgba(0,0,0,.5);';
     root.appendChild(this.el);
   }
 

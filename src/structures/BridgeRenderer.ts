@@ -24,9 +24,10 @@ import type { NavGraph } from '../nav/NavGraph';
 import type { GeoData } from '../world/GeoData';
 import { terrainHeightKm } from '../world/Cities';
 import { SCALE_GLSL, getRoadNet, getRoadUniforms, ihash, type RoadNet, type Stations } from '../nav/RoadGeometry';
+import { Q } from '../core/quality';
 
 const CHUNK_KM = 40;
-const MAX_DIST = 60;
+// Sichtweite der Brückenmodelle: Q.bridgeDist (hoch = 60 km)
 const REBUILDS_PER_FRAME = 3;
 const MAX_BUILT = 40;
 const G = 0.001;
@@ -553,7 +554,7 @@ export class BridgeRenderer {
       }
     } else ty = Math.max(0, terrainHeightKm(this.geo, tx, tz)) * this.exag;
     const dist = Math.max(1, Math.hypot(_cam.x - tx, _cam.y - ty, _cam.z - tz));
-    const vis = dist < MAX_DIST;
+    const vis = dist < Q.bridgeDist;
     this.object.visible = vis;
     if (!vis) return;
     const R = Math.min(120, Math.max(14, dist * 1.5));

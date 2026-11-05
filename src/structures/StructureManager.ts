@@ -9,6 +9,7 @@
  * maße wachsen mit dem Kameraabstand, Längen bleiben wahr), in der Fernsicht kleine Punktsymbole.
  * Der Maßstab wird per onBeforeRender mit der echten Kamera berechnet – kein extra Verdrahten nötig.
  */
+import { isSiteVisible } from '../fog/fogVis';
 import * as THREE from 'three';
 import { bus } from '../core/EventBus';
 import type { Settings } from '../core/types';
@@ -417,6 +418,7 @@ export class StructureManager {
   private viewTimer = 0;
   private lastScale = 0;
   private lastExag = 0;
+  private fogKey = 0;
   private visScale = SCALE.structures;
   private camDist = 50;
 
@@ -1224,6 +1226,14 @@ export class StructureManager {
     const showSymbols = dist > SYMBOL_DIST && dist < SYMBOL_MAX_DIST;
     const show3d = dist <= SYMBOL_DIST * 1.0;
     this.symbols.visible = showSymbols && this.recs.size > 0;
+    // Nebel des Krieges: Signatur der Sichtbarkeit feindlicher Bauwerke; bei Änderung neu aufbauen
+    let fk = 0;
+    for (const r of this.recs.values()) fk = (Math.imul(fk, 31) + (isSiteVisible(r.info.owner, r.cx, r.cz) ? 1 : 2)) | 0;
+    if (fk !== this.fogKey) {
+      this.fogKey = fk;
+      this.viewDirty = true;
+      this.symbolsDirty = true;
+    }
     // Hinweis: mesh bleibt immer sichtbar (sonst würde onBeforeRender nie mehr aufgerufen); ausgeblendet = count 0
     if (showSymbols && this.symbolsDirty) this.rebuildSymbols();
     if (!show3d || this.recs.size === 0) {
@@ -1257,6 +1267,7 @@ export class StructureManager {
     let n = 0;
     const cap = this.capacity;
     for (const r of this.recs.values()) {
+      if (!isSiteVisible(r.info.owner, r.cx, r.cz)) continue;
       const prog = r.info.progress, rise = Math.max(0.18, prog);
       const d = r.pieces;
       for (let i = 0; i < r.nPieces && n < cap; i++) {
@@ -1304,6 +1315,7 @@ export class StructureManager {
     const pos = new Float32Array(Math.max(1, n) * 3), col = new Float32Array(Math.max(1, n) * 3);
     let i = 0;
     for (const r of this.recs.values()) {
+      if (!isSiteVisible(r.info.owner, r.cx, r.cz)) continue;
       pos[i * 3] = r.cx; pos[i * 3 + 1] = this.groundY(r.cx, r.cz) + 1.2; pos[i * 3 + 2] = r.cz;
       const c = SYMBOL_COLOR[r.info.kind] ?? 0xffffff;
       _c.setHex(c);
@@ -1313,7 +1325,7 @@ export class StructureManager {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.setDrawRange(0, n);
+    g.setDrawRange(0, i);
     this.symbols.geometry.dispose();
     this.symbols.geometry = g;
   }

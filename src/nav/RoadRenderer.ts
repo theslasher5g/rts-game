@@ -10,6 +10,7 @@ import {
   getRoadNet, getRoadUniforms, stationAtOrAfter, stationAtOrBefore, type Crossing, type RestStop,
 } from './RoadGeometry';
 import { RoadProps, type PropTile } from './RoadProps';
+import { Q } from '../core/quality';
 
 /**
  * Straßen-/Schienen-/Fährnetz als aufs Gelände gelegte Bänder (ein Mesh je Klasse + Brücken).
@@ -359,12 +360,9 @@ interface Tile {
 }
 
 /** Ab diesem Kameraabstand (km) gibt es nur noch die Linien-Darstellung */
-const DETAIL_MAX = 38;
+// DETAIL_MAX / PROP_MAX_DIST / MAX_TILES / PROP_BUDGET: Q.roadRibbonDist / roadPropDist / roadMaxTiles / roadPropBudget (core/quality.ts)
 /** Props nur bis zu diesem Kameraabstand */
-const PROP_MAX_DIST = 15;
 const TILE_BUILDS_PER_FRAME = 3;
-const MAX_TILES = 150;
-const PROP_BUDGET = 60000;
 void T_BALLAST;
 
 export class RoadRenderer {
@@ -544,11 +542,11 @@ export class RoadRenderer {
       fy = Math.max(0, terrainHeightKm(this.geo, fx, fz)) * this.exag;
     }
     const dist = Math.max(1, Math.hypot(cp.x - fx, cp.y - fy, cp.z - fz));
-    const vis = dist < DETAIL_MAX;
+    const vis = dist < Q.roadRibbonDist;
     this.detail.visible = vis;
     if (!vis) { this.setMask(false, fx, fz, 0); return; }
     const R = Math.min(34, Math.max(7, dist * 1.35));
-    const propR = dist < PROP_MAX_DIST ? Math.min(15, Math.max(5, dist * 1.3 + 2)) : 0;
+    const propR = dist < Q.roadPropDist ? Math.min(Q.roadPropDist, Math.max(Math.min(5, Q.roadPropDist), dist * 1.3 + 2)) : 0;
     const t0x = Math.floor((fx - R) / TILE_KM), t1x = Math.floor((fx + R) / TILE_KM);
     const t0z = Math.floor((fz - R) / TILE_KM), t1z = Math.floor((fz + R) / TILE_KM);
     this.cand.length = 0;
@@ -610,12 +608,12 @@ export class RoadRenderer {
 
   private evict(): void {
     // Props: Obergrenze Instanzen/Kacheln, Bänder: Kachelanzahl
-    if (this.props.total > PROP_BUDGET || this.tiles.size > MAX_TILES) {
+    if (this.props.total > Q.roadPropBudget || this.tiles.size > Q.roadMaxTiles) {
       const list = Array.from(this.tiles.values()).filter((t) => t.last < this.frame).sort((a, b) => a.last - b.last);
       for (const t of list) {
-        if (this.props.total <= PROP_BUDGET && this.tiles.size <= MAX_TILES) break;
+        if (this.props.total <= Q.roadPropBudget && this.tiles.size <= Q.roadMaxTiles) break;
         if (t.props) { this.props.disposeTile(t.props); t.props = null; t.propsBuilt = false; }
-        if (this.tiles.size > MAX_TILES) {
+        if (this.tiles.size > Q.roadMaxTiles) {
           if (t.ribbon) { this.detail.remove(t.ribbon); t.ribbon.geometry.dispose(); t.ribbon = null; }
           if (t.tx >= 0 && t.tz >= 0 && t.tx < this.maskW && t.tz < this.maskH) this.mask[t.tz * this.maskW + t.tx] = 0;
           this.maskTex.needsUpdate = true;

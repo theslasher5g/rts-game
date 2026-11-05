@@ -63,6 +63,7 @@ export class Hud {
   private lastDate = '';
   private lastZuf = -1;
   private renderedSpeed = -1;
+  private renderedLocked = false;
   private headerFor: string | null = null;
   private speedBeforePause = 1;
 
@@ -231,6 +232,15 @@ export class Hud {
     if (date !== this.lastDate) {
       this.dateEl.textContent = date;
       this.lastDate = date;
+    }
+    if (st.timeLocked !== this.renderedLocked) {
+      // Mehrspieler-Gast: Zeitsteuerung gehört dem Host
+      this.renderedLocked = st.timeLocked;
+      this.speedBtns.forEach((b, i) => {
+        b.disabled = st.timeLocked;
+        b.title = st.timeLocked ? 'Nur der Host steuert die Spielgeschwindigkeit' : i === 0 ? 'Pause (Leertaste)' : `Zeitraffer ${SPEED_LABELS[i]} (Tasten + / −)`;
+      });
+      this.dateEl.title = st.timeLocked ? 'Spielzeit wird vom Host gesteuert' : '';
     }
     if (st.speed !== this.renderedSpeed) {
       this.renderedSpeed = st.speed;
