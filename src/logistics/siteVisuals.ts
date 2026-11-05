@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import type { BaseKind } from './types';
 import type { GeoData } from '../world/GeoData';
 import { nationColor } from './prices';
+import { SCALE } from '../core/scale';
 
 export type SiteKind = 'rig' | BaseKind;
 
@@ -429,11 +430,9 @@ interface SiteObj {
 
 const MODEL_MAX_DIST = 75;
 const MARKER_MIN_DIST = 45;
-const SCALE_K = 1.5;
-const SCALE_MIN = 2;
-const SCALE_MAX = 40;
 /** Große Anlagen wachsen weniger stark mit dem Kameraabstand */
-const KIND_SCALE: Partial<Record<SiteKind, number>> = { hq: 0.7, factory: 0.7, refinery: 0.55, airfield: 0.5, shipyard: 0.6 };
+/** Zusatzfaktor je Art relativ zu SCALE.bases (große Anlagen etwas kleiner als kompakte Landmarken) */
+const KIND_SCALE: Partial<Record<SiteKind, number>> = { hq: 0.9, factory: 0.9, refinery: 0.8, airfield: 0.7, shipyard: 0.8 };
 const _cam = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
@@ -599,7 +598,7 @@ export class SiteLayer {
     this.camDistKm = dist;
     const showModels = dist <= MODEL_MAX_DIST;
     const showMarkers = dist >= MARKER_MIN_DIST;
-    const sc = Math.min(SCALE_MAX, Math.max(SCALE_MIN, SCALE_K * dist));
+    const sc = SCALE.bases; // fester Landmarken-Maßstab, unabhängig vom Kameraabstand
     const changed = Math.abs(sc / (this.lastScale || 1) - 1) > 0.03 || this.lastScale === 0;
     if (showMarkers && this.markersDirty) this.rebuildMarkers();
     for (const p of this.markers.values()) p.visible = showMarkers && p.geometry.drawRange.count > 0;

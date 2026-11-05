@@ -48,6 +48,11 @@ export class Minimap {
   private readonly fogCanvas: HTMLCanvasElement;
   private readonly fogCtx: CanvasRenderingContext2D;
   private fogImg: ImageData | null = null;
+  // Phase 7: Pings (Lagemeldungen) – eigene Ebene, eigene Animationsschleife nur solange Pings laufen
+  private readonly pingCanvas: HTMLCanvasElement;
+  private readonly pingCtx: CanvasRenderingContext2D;
+  private pings: Array<{ x: number; z: number; kind: 'info' | 'warn' | 'danger'; t0: number }> = [];
+  private pingRaf = 0;
 
   constructor(root: HTMLElement, geo: GeoData) {
     this.geo = geo;
@@ -79,7 +84,12 @@ export class Minimap {
     this.fogCanvas.height = this.h;
     this.fogCanvas.style.cssText = `position:absolute;left:0;top:0;width:${this.w}px;height:${this.h}px;pointer-events:none;display:none`;
     this.fogCtx = this.fogCanvas.getContext('2d')!;
-    cw.append(this.base, this.fogCanvas, this.overlay);
+    this.pingCanvas = document.createElement('canvas');
+    this.pingCanvas.width = this.w;
+    this.pingCanvas.height = this.h;
+    this.pingCanvas.style.cssText = `position:absolute;left:0;top:0;width:${this.w}px;height:${this.h}px;pointer-events:none`;
+    this.pingCtx = this.pingCanvas.getContext('2d')!;
+    cw.append(this.base, this.fogCanvas, this.overlay, this.pingCanvas);
     this.wrap.append(head, cw);
     layer.appendChild(this.wrap);
     root.appendChild(layer);
@@ -198,6 +208,52 @@ export class Minimap {
   show(): void {
     this.wrap.classList.remove('hidden');
   }
+
+  /**
+   * Phase 7: Ping auf der Lagekarte – expandierender Ring (~4 s), Farbe nach Art; Gefahrenmeldungen (danger) bleiben
+   * danach 20 s lang als pulsierender Punkt stehen.
+   */
+  ping(x: number, z: number, kind: 'info' | 'warn' | 'danger' = 'warn'): void {
+    this.pings.push({ x, z, kind, t0: performance.now() });
+    if (this.pings.length > 24) this.pings.shift();
+    if (!this.pingRaf) this.pingRaf = requestAnimationFrame(this.pingLoop);
+  }
+
+  private readonly pingLoop = (): void => {
+    this.pingRaf = 0;
+    const now = performance.now();
+    const ctx = this.pingCtx;
+    ctx.clearRect(0, 0, this.w, this.h);
+    const kx = this.w / this.geo.widthKm, kz = this.h / this.geo.heightKm;
+    this.pings = this.pings.filter((p) => now - p.t0 < (p.kind === 'danger' ? 20000 : 4000));
+    for (const p of this.pings) {
+      const age = (now - p.t0) / 1000;
+      const px = clamp(p.x * kx, 2, this.w - 2), py = clamp(p.z * kz, 2, this.h - 2);
+      const col = p.kind === 'danger' ? '226,89,62' : p.kind === 'warn' ? '227,180,67' : '121,194,92';
+      if (age < 4) {
+        for (let k = 0; k < 2; k++) {
+          const a = age - k * 0.5;
+          if (a < 0) continue;
+          const f = a / 3.5;
+          if (f > 1) continue;
+          ctx.beginPath();
+          ctx.arc(px, py, 3 + f * 24, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(${col},${(1 - f) * 0.95})`;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+      if (p.kind === 'danger' || age < 4) {
+        const pulse = 0.5 + 0.5 * Math.sin(now / 160);
+        ctx.fillStyle = `rgba(${col},${p.kind === 'danger' ? 0.55 + 0.4 * pulse : 0.9})`;
+        ctx.fillRect(Math.round(px) - 2, Math.round(py) - 2, 5, 5);
+        ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(px) - 2.5, Math.round(py) - 2.5, 6, 6);
+      }
+    }
+    if (this.pings.length) this.pingRaf = requestAnimationFrame(this.pingLoop);
+  };
 
   hide(): void {
     this.wrap.classList.add('hidden');

@@ -23,7 +23,7 @@ import { RoadProps, type PropTile } from './RoadProps';
  * Nahbereich (Kameraabstand < ~38 km): echte Fahrbahnbänder in 6-km-Kacheln (lazy, ≤ 3 Kacheln/Frame, LRU) mit
  * prozeduralem Querschnitt im Fragment-Shader (Asphalt, Mittel-/Randlinien, Seitenstreifen, Mittelstreifen,
  * Spurrillen, Schotterbett + Schwellen + Schienen), Kreuzungsflächen, Autobahnrampen, Rastplätze, Bahnübergänge.
- * Breite/Höhe wachsen mit dem Kameraabstand (strategischer Maßstab S, siehe RoadGeometry). Dazu Straßenmöblierung
+ * Breite/Höhe = reale Maße × SCALE.roadWidth (fest, siehe RoadGeometry). Dazu Straßenmöblierung
  * (RoadProps, ≤ ~15 km). Die Linien-Darstellung bleibt als billige Fernansicht und als Rückfall erhalten.
  */
 

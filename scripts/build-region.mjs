@@ -378,6 +378,8 @@ for (let k = 0; k < N; k++) inland[k] = !sea[k] && water[k] ? 1 : 0;
 const gBox2 = boxMean(grad, 2), gBox4 = boxMean(grad, 4), gBox8 = boxMean(grad, 8);
 const hBox40 = boxMean(heights, 40);
 const wetDist = distKm(wet), seaDist = distKm(sea), riverDist = distKm(inland);
+const wetFrac = boxMean(Float32Array.from(wet), 40); // Wasseranteil im 20x20-km-Fenster (Startaufstellungen sollen nicht in Seenplatten liegen)
+const wetNear = boxMean(Float32Array.from(wet), 20);
 const tpi = new Float32Array(N); { const hb = boxMean(heights, 12); for (let k = 0; k < N; k++) tpi[k] = heights[k] - hb[k]; }
 
 // ---------------------------------------------------------------- 3) Länder
@@ -550,7 +552,7 @@ NATIONS.forEach((n, ni) => {
     if (seaDist[k] < 3) continue;
     const bd = Math.min(borderDist[ni + 1][k], 35);
     const rv = riverDist[k];
-    let s = bd * 1.0 + (rv >= 1.5 && rv <= 7 ? 9 : 0) - gBox4[k] * 220 - 0.12 * Math.hypot(kmX(k) - cent[ni][0], kmZ(k) - cent[ni][1]) - 0.05 * Math.hypot(kmX(k) - sx, kmZ(k) - sz);
+    let s = -wetFrac[k] * 12 + bd * 1.0 + (rv >= 1.5 && rv <= 7 ? 9 : 0) - gBox4[k] * 220 - 0.12 * Math.hypot(kmX(k) - cent[ni][0], kmZ(k) - cent[ni][1]) - 0.05 * Math.hypot(kmX(k) - sx, kmZ(k) - sz);
     if (s > bs) { bs = s; best = k; }
   }
   if (best < 0) throw new Error('Keine Hauptstadt-Position für ' + n.a3);
@@ -637,12 +639,14 @@ const startPos = NATIONS.map((n, ni) => {
     }
     return best;
   };
-  const hq = find(cr + 0.6, cr + 4.5, cap.cell, (k, d, cs) => (wetDist[k] < 0.8 || gBox2[k] > 0.05 ? -1e9 : -gBox2[k] * 120 - Math.abs(d - (cr + 1.8)) * 0.8 + cs * 0.8));
+  // Wasser in der Nähe: Einheiten der Startaufstellung werden im Umkreis verteilt und dürfen nicht in Seen-/Sumpf-Taschen landen
+  let hq = -1;
+  for (const wn of [0.012, 0.03, 0.08, 1]) { hq = find(cr + 0.6, cr + 4.5, cap.cell, (k, d, cs) => (wetNear[k] > wn || wetDist[k] < 0.8 || gBox2[k] > 0.05 ? -1e9 : -wetFrac[k] * 120 - gBox2[k] * 120 - Math.abs(d - (cr + 1.8)) * 0.8 + cs * 0.8)); if (hq >= 0) break; }
   const ref = find(1.4, 3.2, hq, (k, d, cs) => (wetDist[k] < 0.6 || gBox2[k] > 0.05 || cellDistKm(k, cap.cell) < cr + 0.3 ? -1e9 : -gBox2[k] * 120 - Math.abs(d - 2) * 0.6 - cs * 0.6));
   // Startplatz: >= 35 km vom Fremdland (Meer zählt nicht), sonst schrittweise gelockert
   let spawn = -1, spawnBd = 0;
   for (const minBd of [35, 28, 22, 16, 10, 3]) {
-    spawn = find(7, 15, cap.cell, (k, d, cs) => (wetDist[k] < 2 || borderDist[ni + 1][k] < minBd || heights[k] > 700 ? -1e9 : -gBox8[k] * 90 - gBox2[k] * 60 + cs * 2.2 - Math.abs(d - 10) * 0.08 + Math.min(borderDist[ni + 1][k], 40) * 0.05));
+    spawn = find(7, 15, cap.cell, (k, d, cs) => (wetDist[k] < 2 || wetNear[k] > 0.02 || wetFrac[k] > 0.2 || borderDist[ni + 1][k] < minBd || heights[k] > 700 ? -1e9 : -wetFrac[k] * 120 - gBox8[k] * 90 - gBox2[k] * 60 + cs * 2.2 - Math.abs(d - 10) * 0.08 + Math.min(borderDist[ni + 1][k], 40) * 0.05));
     if (spawn >= 0) { spawnBd = minBd; break; }
   }
   log(`Startplatz ${n.a3}: Grenzabstand ${borderDist[ni + 1][spawn].toFixed(1)} km (Vorgabe ${spawnBd})`);
@@ -659,11 +663,12 @@ const teamIdx = (ni) => MP_TEAMS.findIndex((t) => t.includes(NATIONS[ni].a3));
     if (!owner[k] || !mainLand[k] || wet[k] || wetDist[k] < 1.5) continue;
     const strict = heights[k] <= 230 && gBox2[k] <= 0.02 && hBox40[k] <= 300;
     const loose = heights[k] <= 420 && gBox2[k] <= 0.04 && hBox40[k] <= 520;
-    if (!strict && !loose) continue;
+    const valley = heights[k] <= 620 && gBox2[k] <= 0.05 && hBox40[k] <= 760; // Talboden im Gebirge (nur Notlösung)
+    if (!strict && !loose && !valley) continue;
     if (cities.some((c) => cellDistKm(c.cell, k) < 9)) continue;
     if (startPos.some((p) => cellDistKm(p.hq, k) < 9 || cellDistKm(p.spawn, k) < 9)) continue;
     const ownCap = cities.find((c) => c.capital && c.nat === nationOf(k));
-    cand.push({ k, ni: nationOf(k), score: -gBox4[k] * 40 - heights[k] / 120 - hBox40[k] / 250 - cellDistKm(ownCap.cell, k) / 22 + rnd() * 2 - (strict ? 0 : 6), bd: borderDist[nationOf(k) + 1][k] });
+    cand.push({ k, ni: nationOf(k), score: -gBox4[k] * 40 - heights[k] / 120 - hBox40[k] / 250 - cellDistKm(ownCap.cell, k) / 22 + rnd() * 2 - (strict ? 0 : loose ? 6 : 10), bd: borderDist[nationOf(k) + 1][k], dCap: cellDistKm(ownCap.cell, k) });
   }
   cand.sort((a, b) => b.score - a.score);
   log(`Ölfeld-Kandidaten: ${cand.length}`);
@@ -685,7 +690,10 @@ const teamIdx = (ni) => MP_TEAMS.findIndex((t) => t.includes(NATIONS[ni].a3));
   for (let round = 0; round < perNation; round++) NATIONS.forEach((n, ni) => {
     const have = oilFields.filter((f) => f.nat === ni).length;
     if (have >= perNation) return;
-    let c = cand.find((q) => q.ni === ni && ok(q.k) && q.bd >= 12);
+    // Kernlandfelder: ca. 40 km von der Hauptstadt (gleichmäßige Nachschubwege für alle Nationen), nicht an der Grenze
+    const homeScore = (q) => q.score * 0.5 - Math.abs(q.dCap - 40) / 7;
+    let c = null, cs = -1e9;
+    for (const q of cand) if (q.ni === ni && q.bd >= 12 && q.dCap <= 75 && ok(q.k) && homeScore(q) > cs) { cs = homeScore(q); c = q; }
     if (!c) c = cand.find((q) => q.ni === ni && ok(q.k, 12) && q.bd >= 6);
     if (!c) c = cand.find((q) => q.ni === ni && ok(q.k, 9));
     if (c) add(c.k, false); else log('WARNUNG: kein Ölfeld für', n.a3);
@@ -701,7 +709,7 @@ const OIL_PRE = { west: 'Polje', east: 'Feld', south: 'Campo', north: 'Kút' };
 oilFields.forEach((f, i) => {
   const n = NATIONS[f.nat];
   let nm;
-  do { nm = `${OIL_PRE[n.homeland] ?? 'Feld'} ${rpick(OIL_SURN[n.homeland] ?? OIL_SURN.east)}-${1 + Math.floor(rnd() * 9)}`; } while (usedNames.has(nm));
+  do { nm = f.contested && n.a3 === 'KRN' ? `Feld Karsten-${1 + Math.floor(rnd() * 9)}` : `${OIL_PRE[n.homeland] ?? 'Feld'} ${rpick(OIL_SURN[n.homeland] ?? OIL_SURN.east)}-${1 + Math.floor(rnd() * 9)}`; } while (usedNames.has(nm));
   usedNames.add(nm);
   f.name = nm; f.id = i + 1;
   f.output = Math.round((f.contested ? 40 + rnd() * 20 : 20 + rnd() * 30));

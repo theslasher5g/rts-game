@@ -4,7 +4,7 @@
  * - Prozedurale Low-Poly-Modelle (flach schattiert, Vertexfarben), je Modell ein InstancedMesh
  *   über alle Mitglieder aller Verbände dieses Modells. Pro Vertex ein "Paint"-Kanal:
  *   0 = feste Farbe (Ketten, Glas), 1 = Tarnfarbe (Instanzfarbe × Vertexfarbe), 2 = Teamfarbe.
- * - Strategischer Sichtmaßstab: Modelle werden mit dem Kameraabstand hochskaliert (bleiben lesbar).
+ * - Fester Darstellungsmaßstab (SCALE.units / SCALE.infantry, siehe core/scale.ts): Modelle wachsen NICHT mit dem Kameraabstand.
  * - Fernansicht: NATO-Taktische Zeichen (Billboards aus einem Canvas-Atlas, Freund/Feind/Neutral).
  * - Auswahlringe am Boden + Zustands-/Treibstoffbalken über ausgewählten Einheiten.
  */
@@ -36,7 +36,7 @@ type ModelDef = ModelDefT;
 // ---------------------------------------------------------------- Farben
 
 const CAMO: Record<string, number> = {
-  VAL: 0x4f5c4a, KRN: 0x6a6040, MAR: 0x8a7a55, DEU: 0x4c5536, FRA: 0x5a5f3c, GBR: 0x55593c, POL: 0x4f5a37, RUS: 0x4b5832, UKR: 0x56603f, TUR: 0x5c5a3e,
+  VAL: 0x4f5c4a, KRN: 0x6a6040, MAR: 0x8a7a55, PAN: 0x6b6a3c, DEU: 0x4c5536, FRA: 0x5a5f3c, GBR: 0x55593c, POL: 0x4f5a37, RUS: 0x4b5832, UKR: 0x56603f, TUR: 0x5c5a3e,
   ITA: 0x6a6243, ESP: 0x6b6447, NLD: 0x4a5238, SWE: 0x4e5a45, NOR: 0x4d5543, FIN: 0x58604c, ROU: 0x5a5c3b,
   GRC: 0x5d5c3e, BLR: 0x4f5a36, HUN: 0x55583a,
 };

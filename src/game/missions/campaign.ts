@@ -195,7 +195,8 @@ export function getMission(id: string): MissionDef | undefined {
 
 /** Freies Spiel: Raffinerie und Hauptquartier des Gegners zerstören; verlieren, wenn beide eigenen fallen */
 export function skirmishMission(playerA3: string): MissionDef {
-  const enemies = playerA3 === 'KRN' ? ['VAL', 'MAR'] : ['KRN'];
+  // Pannonien (PAN) spielt im freien Spiel als Verbündeter Kronlands gegen VAL + MAR (mpDiplomacy('teams'))
+  const enemies = playerA3 === 'KRN' || playerA3 === 'PAN' ? ['VAL', 'MAR'] : ['KRN'];
   return {
     id: 'skirmish',
     name: 'Freies Spiel',

@@ -14,6 +14,7 @@ import type { CasualtyCause, CivilCity, InfraInfo, InfraKind } from './types';
 import { generateInfra, cityRadiusKm, rngFrom } from './infra';
 import { terrainHeightKm } from '../world/Cities';
 import { buildCivilGeometries, BUS_COLORS, CAR_COLORS, CLOTH_COLORS, INFRA_HEIGHT_M, INFRA_KINDS, TRUCK_COLORS, type VehicleModel } from './CivilModels';
+import { SCALE } from '../core/scale';
 
 /** Wegfindung (strukturell = Pathfinder) */
 export interface RouteLike {
@@ -33,24 +34,18 @@ export interface CivilianDeps {
 
 /** Modellsichtbarkeit (Kameraabstand km) */
 // Kleine Karte (300 × 200 km): Gesamtansicht ≈ 320 km Abstand – dort keine Symbole, sie erscheinen erst beim Heranzoomen
-const INFRA_MODEL_MAX = 60;
-const INFRA_ICON_MIN = 60;
+const INFRA_MODEL_MAX = 40;
+const INFRA_ICON_MIN = 40;
 const INFRA_ICON_MAX = 70;
 const EMBLEM_MAX = 70;
-const AMBIENT_MAX = 30;
-const PED_MAX_DIST = 8;
+const AMBIENT_MAX = 14;
+const PED_MAX_DIST = 4;
 const FLOW_LINE_MIN = 10;
 const FLOW_LINE_MAX = 900;
 /** Fahrzeug-/Fußgängerpools */
 const VEH_POOL = 3000;
 const PED_POOL = 4000;
-/** Sichtmaßstab der Infrastruktur-Modelle: clamp(K·dist, 1, MAX) */
-const INFRA_SCALE_K = 0.06;
-const INFRA_SCALE_MAX = 12;
-/** Sichtmaßstab der Fahrzeuge */
-const VEH_SCALE_K = 2.0;
-const VEH_SCALE_MIN = 3;
-const VEH_SCALE_MAX = 90;
+/** Maßstab der Infrastruktur-Modelle, Fahrzeuge und Fußgänger: FEST (SCALE.infra), unabhängig vom Kameraabstand */
 const MAX_FLOWS = 160;
 const RECENT_FIRE_S = 25;
 const BOMBARD_WINDOW_S = 60;
@@ -1397,7 +1392,7 @@ export class CivilianSystem {
 
     const showInfra = this.show;
     // --- Infrastruktur-Modelle / Icons / Embleme
-    const s = clamp(INFRA_SCALE_K * dist, 1, INFRA_SCALE_MAX);
+    const s = SCALE.infra;
     const models = showInfra && dist < INFRA_MODEL_MAX;
     const icons = showInfra && dist >= INFRA_ICON_MIN && dist <= INFRA_ICON_MAX;
     const emblems = showInfra && dist <= EMBLEM_MAX;
@@ -1421,7 +1416,7 @@ export class CivilianSystem {
     // --- Fahrzeuge / Fußgänger
     for (const k of Object.keys(this.vehCount) as VehicleModel[]) this.vehCount[k] = 0;
     if (this.show && dist < AMBIENT_MAX) {
-      const vs = clamp(VEH_SCALE_K * dist, VEH_SCALE_MIN, VEH_SCALE_MAX);
+      const vs = SCALE.infra;
       this.renderAmbient(vs, dist, dtH);
       if (dist < PED_MAX_DIST) this.renderPeds(Math.min(vs, 14), dist);
       this.renderFlowInstances(vs, dist);
@@ -1550,8 +1545,8 @@ export class CivilianSystem {
     const out: number[] = [];
     this.graph.edgesInRect(fx - R, fz - R, fx + R, fz + R, out);
     const near = this.cities.filter((c) => Math.abs(c.x - fx) < R + 70 && Math.abs(c.z - fz) < R + 70 && c.control !== 'ruined');
-    const vs = clamp(VEH_SCALE_K * dist, VEH_SCALE_MIN, VEH_SCALE_MAX);
-    const thin = Math.min(1, 7 / vs);
+    // Verkehrsdichte mit dem Abstand ausdünnen (Fahrzeuge bleiben gleich groß, werden aber ab ~6 km seltener)
+    const thin = Math.min(1, 6 / Math.max(1, dist));
     const day = this.dayFactor();
     const baseD: Record<string, number> = { motorway: 6, primary: 4, secondary: 2.5, road: 1.2, track: 0.2 };
     const list: Array<{ e: number; n: number; speed: number; rail: boolean }> = [];
@@ -1595,7 +1590,7 @@ export class CivilianSystem {
     const moved = Math.hypot(this.camFocusX - this.ambientFx, this.camFocusZ - this.ambientFz);
     if (this.ambientTimer > 15 || moved > Math.max(0.5, dist * 0.25)) { this.ambientTimer = 0; this.refreshAmbient(dist); }
     const sc = 0.001 * vs;
-    const lane = 0.0014 * vs;
+    const lane = 0.0014 * SCALE.roadWidth;
     const lift = 0.0008 * vs;
     const t = this.visTime;
     const R = Math.min(AMBIENT_MAX, Math.max(5, dist * 2.2));
@@ -1728,7 +1723,7 @@ export class CivilianSystem {
         const dx = p[seg * 2 + 2] - p[seg * 2], dz = p[seg * 2 + 3] - p[seg * 2 + 1];
         const l = Math.hypot(dx, dz) || 1;
         const nx = dx / l, nz = dz / l;
-        const lane = ((i % (carLike ? 2 : 3)) - (carLike ? 0.5 : 1)) * (carLike ? 0.0016 * vs : 0.0008 * Math.min(vs, 14));
+        const lane = ((i % (carLike ? 2 : 3)) - (carLike ? 0.5 : 1)) * (carLike ? 0.0016 * SCALE.roadWidth : 0.0008 * SCALE.roadWidth);
         const x = this._p[0] - nz * lane, z = this._p[1] + nx * lane;
         if (Math.abs(x - this.camFocusX) > R || Math.abs(z - this.camFocusZ) > R) continue;
         const yaw = Math.atan2(nx, nz);

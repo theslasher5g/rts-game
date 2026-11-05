@@ -57,6 +57,8 @@ export class LobbyPanel {
   private transport: MpTransport | null = null;
   private offs: Array<() => void> = [];
   private busy = false;
+  private lastKey = '';
+  private readonly pingEls = new Map<string, HTMLSpanElement>();
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** aktuelle Sitzung (nach Verbindungsaufbau) */
@@ -349,11 +351,23 @@ export class LobbyPanel {
     const room = this.transport?.room ?? null;
     this.stepConnect.classList.toggle('hidden', !!room);
     this.stepRoom.classList.toggle('hidden', !room);
+    if (!room) this.lastKey = '';
     if (room) this.renderRoom(room);
   }
 
   private renderRoom(room: RoomInfo): void {
     const t = this.transport!;
+    // Nur neu aufbauen, wenn sich etwas Sichtbares außer den Ping-Werten geändert hat (sonst gehen Klicks verloren)
+    const key = JSON.stringify({ ...room, peers: room.peers.map((p) => ({ ...p, pingMs: 0 })), self: t.selfId });
+    if (key === this.lastKey) {
+      for (const p of room.peers) {
+        const e = this.pingEls.get(p.id);
+        if (e) e.textContent = this.pingText(p, p.id === t.selfId);
+      }
+      return;
+    }
+    this.lastKey = key;
+    this.pingEls.clear();
     const selfId = t.selfId;
     const isHost = room.hostId === selfId;
     const me = room.peers.find((p) => p.id === selfId) ?? null;
@@ -401,6 +415,11 @@ export class LobbyPanel {
           : 'Warte auf den Host …';
   }
 
+  private pingText(p: PeerInfo, isSelf: boolean): string {
+    if (p.pingMs !== undefined) return `${p.pingMs} ms`;
+    return isSelf && this.transport && this.transport.latency ? `${this.transport.latency} ms` : '';
+  }
+
   private emptyCard(room: RoomInfo, i: number): HTMLDivElement {
     const c = div('lb-slot empty');
     c.append(div('lb-slot-no', `PLATZ ${i + 1}`), div('lb-pname', 'Frei'), div('lb-nat-sub', room.fillAI ? 'Nicht gewählte Nationen übernimmt die KI.' : 'Wartet auf Spieler …'));
@@ -416,7 +435,8 @@ export class LobbyPanel {
     const crown = span('lb-crown', p.host ? '♛' : '');
     crown.title = p.host ? 'Host' : '';
     const name = span('lb-pname', p.name + (isSelf ? ' (du)' : ''));
-    const ping = span('lb-ping muted', p.pingMs !== undefined ? `${p.pingMs} ms` : isSelf && this.transport && this.transport.latency ? `${this.transport.latency} ms` : '');
+    const ping = span('lb-ping muted', this.pingText(p, isSelf));
+    this.pingEls.set(p.id, ping);
     const ready = span('lb-ready' + (p.ready || p.host ? ' on' : ''), p.ready || p.host ? '✔' : '○');
     ready.title = p.host ? 'Host' : p.ready ? 'Bereit' : 'Nicht bereit';
     top.append(crown, name, ping, ready);

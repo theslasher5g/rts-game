@@ -12,9 +12,9 @@ import {
 export type { ModelDef };
 export { buildRotorGeom };
 
-// Nordadria: Valdoria (VAL) = Leopard-Profil, Kronland (KRN) = T-90-Profil, Marenia (MAR) = Abrams-Profil
+// Nordadria: Valdoria (VAL) = Leopard-Profil, Kronland (KRN) = T-90-Profil, Marenia (MAR) = Abrams-Profil, Pannonien (PAN) = T-90-Profil (Pakt mit KRN)
 const WEST = new Set(['DEU', 'NOR', 'SWE', 'ESP', 'GRC', 'POL', 'VAL']);
-const RUSSIAN = new Set(['RUS', 'BLR', 'KRN']);
+const RUSSIAN = new Set(['RUS', 'BLR', 'KRN', 'PAN']);
 
 /** Unit-Typ-ID -> Soldatenvariante */
 const SOLDIER_KIND: Record<string, SoldierKind> = {

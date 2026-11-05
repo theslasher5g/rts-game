@@ -4,6 +4,7 @@ import { SCENARIO_NAME, SCENARIO_NATIONS } from '../game/scenario';
 import type { GeoData } from '../world/GeoData';
 import { SettingsPanel } from './SettingsPanel';
 import { CampaignMenu } from './MissionPanel';
+import { LobbyPanel } from './LobbyPanel';
 import { getMission } from '../game/missions/campaign';
 
 const SEED_KEY = 'ww3.seed';
@@ -29,6 +30,7 @@ export class MainMenu {
   private readonly cards = new Map<string, HTMLDivElement>();
   private selectedA3: string | null = null;
   private isVisible = false;
+  private lobby: LobbyPanel | null = null;
 
   /**
    * Wird mit dem Seed aufgerufen, wenn „Zufallskarte" / ein neuer Seed bestätigt wird. Solange nichts gesetzt ist,
@@ -113,7 +115,16 @@ export class MainMenu {
       bus.emit('game:start', { countryA3: m.playerNation, missionId });
       this.hide();
     };
-    sb.append(seedRow, note, this.startBtn, campBtn, this.hint, setBtn);
+    // Phase 7: Mehrspieler (Lobby für bis zu 4 Spieler)
+    const mpBtn = document.createElement('button');
+    mpBtn.className = 'btn';
+    mpBtn.textContent = '⚔ Mehrspieler';
+    this.lobby = new LobbyPanel(root);
+    mpBtn.addEventListener('click', () => this.lobby?.open());
+    this.lobby.onStart = () => {
+      this.hide();
+    };
+    sb.append(seedRow, note, this.startBtn, campBtn, mpBtn, this.hint, setBtn);
     side.append(sh, sb);
 
     // Nationen-Karten (unten)

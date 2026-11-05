@@ -1,0 +1,212 @@
+/* ==========================================================================
+   Phase 7 – Kommandeursfähigkeiten (AbilityBar), Funkprotokoll (EventLog), Feld-Eroberungsbalken (FieldBars)
+   ========================================================================== */
+
+/* ---------- AbilityBar: über der Minikarte (Position wird per JS an die Minikarte angepasst) ---------- */
+.ab-bar {
+  position: absolute;
+  left: 12px;
+  bottom: 240px;
+  z-index: 3;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  pointer-events: auto;
+}
+.ab-btn {
+  position: relative;
+  width: 46px;
+  height: 52px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  border: 1px solid var(--line-dim);
+  background: rgba(28, 31, 21, 0.9);
+  color: var(--text);
+  font-family: var(--font);
+  cursor: pointer;
+}
+.ab-btn:hover:not(.cd):not(.poor) { border-color: var(--amber); background: var(--panel-hi); }
+.ab-btn.active { border-color: var(--amber-hi); background: rgba(120, 90, 30, 0.7); box-shadow: 0 0 0 1px var(--amber) inset; }
+.ab-key { align-self: flex-start; font-size: 9px; line-height: 11px; color: var(--amber); padding: 0 3px; letter-spacing: 0; }
+.ab-ic { font-size: 19px; line-height: 20px; color: var(--amber-hi); }
+.ab-cost { font-size: 10px; line-height: 12px; color: var(--khaki); padding-bottom: 2px; }
+.ab-btn.poor { cursor: not-allowed; }
+.ab-btn.poor .ab-ic { color: var(--dim); }
+.ab-btn.poor .ab-cost { color: var(--bad); }
+.ab-btn.cd { cursor: not-allowed; }
+.ab-btn.cd .ab-ic { color: var(--dim); }
+.ab-cdov {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  background: rgba(0, 0, 0, 0.62);
+  border-top: 1px solid var(--amber);
+  pointer-events: none;
+}
+.ab-cdt {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--amber-hi);
+  text-shadow: 0 0 3px #000, 0 0 3px #000;
+  pointer-events: none;
+}
+.ab-btn.cd .ab-cdt { display: flex; }
+.ab-btn.flash { animation: ab-flash 0.5s ease-out; }
+@keyframes ab-flash { 0% { background: rgba(226, 89, 62, 0.8); } 100% { background: rgba(28, 31, 21, 0.9); } }
+
+/* Zielmodus */
+.ab-hint {
+  position: absolute;
+  left: 50%;
+  top: 128px;
+  transform: translateX(-50%);
+  z-index: 7;
+  pointer-events: none;
+  padding: 4px 12px;
+  border: 1px solid var(--amber);
+  background: rgba(40, 32, 12, 0.9);
+  color: var(--amber-hi);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.ab-hint.bad { border-color: var(--bad); color: #ff9a80; }
+.ab-hint.warn { border-color: var(--warn); color: var(--warn); }
+.ab-svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 4; overflow: visible; }
+.ab-svg polygon { fill: rgba(227, 165, 52, 0.12); stroke: var(--amber-hi); stroke-width: 2; stroke-dasharray: 6 4; }
+.ab-svg.bad polygon { fill: rgba(226, 89, 62, 0.16); stroke: var(--bad); }
+.ab-svg.warn polygon { fill: rgba(227, 180, 67, 0.16); stroke: var(--warn); }
+.ab-svg line { stroke: var(--amber-hi); stroke-width: 2; }
+.ab-svg.bad line { stroke: var(--bad); }
+.ab-tip {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: rgba(17, 19, 13, 0.92);
+  border: 1px solid var(--line);
+  color: var(--text);
+  white-space: nowrap;
+  transform: translate(14px, 14px);
+}
+.ab-tip.bad { color: #ff9a80; border-color: var(--bad); }
+
+/* ---------- EventLog (Funkprotokoll), unten rechts über dem Infopanel ---------- */
+.evl {
+  position: absolute;
+  right: 40px;
+  bottom: 190px;
+  width: 262px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  pointer-events: none;
+  font-size: 11px;
+}
+.evl.hidden { display: none; }
+.evl-head {
+  align-self: flex-end;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border: 1px solid var(--line-dim);
+  background: var(--panel);
+  cursor: pointer;
+  font-family: var(--font);
+}
+.evl-head:hover { border-color: var(--amber); background: var(--panel-hi); }
+.evl-badge { min-width: 16px; padding: 0 4px; text-align: center; color: #14110c; background: var(--amber); letter-spacing: 0; }
+.evl-badge.danger { background: var(--bad); color: #fff; animation: evl-pulse 1s steps(2) infinite; }
+.evl-badge.zero { display: none; }
+@keyframes evl-pulse { 50% { opacity: 0.55; } }
+.evl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+.evl.open .evl-list {
+  pointer-events: auto;
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.evl-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 7px;
+  border-left: 3px solid var(--line);
+  background: rgba(17, 19, 13, 0.88);
+  color: var(--text);
+  pointer-events: auto;
+  transition: opacity 0.6s ease;
+  line-height: 14px;
+}
+.evl-row.pos { cursor: pointer; }
+.evl-row.pos:hover { background: var(--panel-hi); }
+.evl-row.info { border-left-color: var(--good); }
+.evl-row.warn { border-left-color: var(--warn); }
+.evl-row.danger { border-left-color: var(--bad); }
+.evl-row.fresh { background: rgba(60, 52, 24, 0.95); box-shadow: 0 0 0 1px var(--amber) inset; }
+.evl-row.danger.fresh { background: rgba(80, 30, 22, 0.95); box-shadow: 0 0 0 1px var(--bad) inset; }
+.evl-row.gone { display: none; }
+.evl:not(.open) .evl-row.old { display: none; }
+.evl-row.fade { opacity: 0; }
+.evl-t { color: var(--dim); font-size: 10px; }
+.evl-x { overflow-wrap: anywhere; }
+.evl-n { color: var(--amber-hi); }
+.evl-j { color: var(--amber); font-size: 10px; }
+.evl-empty { padding: 6px 8px; color: var(--dim); background: rgba(17, 19, 13, 0.88); pointer-events: none; }
+
+/* ---------- FieldBars: Eroberungsbalken über Ölfeldern ---------- */
+.fb-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: hidden; }
+.fb-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 56px;
+  height: 8px;
+  margin: -4px 0 0 -28px;
+  border: 1px solid #000;
+  background: rgba(0, 0, 0, 0.7);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  will-change: transform;
+}
+.fb-bar > i { display: block; height: 100%; width: 0; background: var(--amber); }
+.fb-bar > span {
+  position: absolute;
+  left: 50%;
+  top: -13px;
+  transform: translateX(-50%);
+  font-size: 10px;
+  line-height: 11px;
+  white-space: nowrap;
+  color: var(--text);
+  text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 2px #000;
+}
+
+/* #ui > * setzt pointer-events:auto; diese Ebenen sollen Klicks durchlassen */
+#ui > .fb-layer, #ui > .evl, #ui > .ab-hint, #ui > .ab-tip, #ui > .ab-svg { pointer-events: none; }

@@ -28,8 +28,24 @@ export class GameState {
   playerA3: string | null = null;
   profile: StartProfile | null = null;
   date: Date = new Date(START_DATE);
+  private _speed = 1;
+  /**
+   * Mehrspieler (Gast): true = Zeitsteuerung gesperrt. Zuweisungen an `speed` (Hud-Tasten, Skripte) werden ignoriert;
+   * der Host-Wert kommt über setSpeedRemote().
+   */
+  timeLocked = false;
   /** 0 = Pause, 1..5 */
-  speed = 1;
+  get speed(): number {
+    return this._speed;
+  }
+  set speed(v: number) {
+    if (this.timeLocked) return;
+    this._speed = v;
+  }
+  /** Gast: Geschwindigkeit des Hosts übernehmen */
+  setSpeedRemote(v: number): void {
+    this._speed = v;
+  }
   /** Ölguthaben des Spielers (einzige Währung) */
   readonly oil: OilPool = { barrels: OIL_START_BARRELS, incomePerHour: 0, spendPerHour: 0, inTransit: 0 };
   /** @deprecated Kompatibilität: immer 0 (Ressourcenblöcke entfallen); Öl steht in `oil` */
@@ -73,7 +89,7 @@ export class GameState {
     this.playerA3 = a3;
     this.profile = p ?? null;
     this.date = new Date(START_DATE);
-    this.speed = 1;
+    this._speed = 1;
     this.oil.barrels = OIL_START_BARRELS;
     this.oil.incomePerHour = 0;
     this.oil.spendPerHour = 0;

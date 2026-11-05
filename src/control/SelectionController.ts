@@ -163,6 +163,21 @@ export class SelectionController {
   /** Vom UnitPanel gesetzt: Bau-Palette öffnen/schließen (Taste C) */
   onToggleBuild: (() => void) | null = null;
 
+  /**
+   * Phase 7: Frühe Tasten-Hooks (z. B. AbilityBar: F1..F6, Esc im Zielmodus). Liefert ein Hook true, ist die Taste verbraucht.
+   * Laufen nach den Tipp-/Modal-Prüfungen und vor allen anderen Tasten (auch Esc).
+   */
+  readonly keyHooks: Array<(e: KeyboardEvent) => boolean> = [];
+
+  /**
+   * Phase 7: eigene Basen für Pos1/Rücktaste (HQ) und Tab (Basen durchschalten). Standard: HQ aus den Szenariodaten.
+   * main.ts kann z. B. () => [...economy.basesOf(a3)] setzen (kind 'hq' zuerst gilt als Hauptquartier).
+   */
+  baseProvider: (() => Array<{ x: number; z: number; kind: string; name?: string }>) | null = null;
+
+  private idleCursor = 0;
+  private baseCursor = -1;
+
   /** Einheit unter dem Mauszeiger (Hover) */
   hovered: Unit | null = null;
 
@@ -540,6 +555,72 @@ export class SelectionController {
       n++;
     });
     if (n) this.rts.focus(sx / n, sz / n);
+  }
+
+  /** Alle Kampfeinheiten des Spielers (bewaffnet, keine Unterstützung), unabhängig vom Bildausschnitt (Strg+Umschalt+A) */
+  selectAllCombat(): void {
+    const ids: number[] = [];
+    for (const u of this.units.units) if (this.isOwn(u) && this.isCombat(u)) ids.push(u.id);
+    this.select(ids);
+    this.toast(ids.length ? `${ids.length} Kampfeinheiten gewählt` : 'Keine Kampfeinheiten', ids.length ? 'info' : 'warn');
+  }
+
+  private isCombat(u: Unit): boolean {
+    return u.hp > 0 && u.type.damage > 0 && u.type.category !== 'support' && u.type.category !== 'drone';
+  }
+
+  /** Untätige Kampfeinheiten (kein Befehl, steht) der Reihe nach wählen und anspringen ('.' vor, ',' zurück) */
+  cycleIdle(dir: 1 | -1 = 1): void {
+    const idle: Unit[] = [];
+    for (const u of this.units.units) {
+      if (this.isOwn(u) && this.isCombat(u) && u.orders.length === 0 && u.speedKmh < 1 && u.garrisonId === undefined && !u.airborne) idle.push(u);
+    }
+    if (!idle.length) {
+      this.toast('Keine untätigen Kampfeinheiten', 'info');
+      return;
+    }
+    idle.sort((a, b) => a.id - b.id);
+    let i: number;
+    if (dir > 0) {
+      i = idle.findIndex((u) => u.id > this.idleCursor);
+      if (i < 0) i = 0;
+    } else {
+      i = -1;
+      for (let k = idle.length - 1; k >= 0; k--) if (idle[k].id < this.idleCursor) { i = k; break; }
+      if (i < 0) i = idle.length - 1;
+    }
+    const u = idle[i];
+    this.idleCursor = u.id;
+    this.select([u.id]);
+    this.rts.focus(u.x, u.z);
+    this.toast(`Untätig: ${u.type.name} (${i + 1}/${idle.length})`, 'info', 1400);
+  }
+
+  private ownBases(): Array<{ x: number; z: number; kind: string; name?: string }> {
+    const p = this.baseProvider?.();
+    if (p && p.length) return p;
+    const nat = this.geo.meta.scenario?.nations.find((n) => n.a3 === this.playerA3);
+    if (!nat) return [];
+    return [{ x: nat.hq[0], z: nat.hq[1], kind: 'hq', name: 'Hauptquartier' }, { x: nat.refinery[0], z: nat.refinery[1], kind: 'refinery', name: 'Raffinerie' }];
+  }
+
+  /** Kamera zum Hauptquartier (Pos1 / Rücktaste) */
+  jumpToHq(): void {
+    const bs = this.ownBases();
+    const hq = bs.find((b) => b.kind === 'hq') ?? bs[0];
+    if (!hq) return;
+    this.baseCursor = bs.indexOf(hq);
+    this.rts.focus(hq.x, hq.z);
+  }
+
+  /** Eigene Basen reihum anspringen (Tab / Umschalt+Tab) */
+  cycleBases(dir: 1 | -1 = 1): void {
+    const bs = this.ownBases();
+    if (!bs.length) return;
+    this.baseCursor = (((this.baseCursor + dir) % bs.length) + bs.length) % bs.length;
+    const b = bs[this.baseCursor];
+    this.rts.focus(b.x, b.z);
+    this.toast(`${b.name ?? b.kind} (${this.baseCursor + 1}/${bs.length})`, 'info', 1200);
   }
 
   selectAllOnScreen(): void {
@@ -1001,6 +1082,13 @@ export class SelectionController {
       e.stopPropagation();
     };
 
+    for (const h of this.keyHooks) {
+      if (h(e)) {
+        consume();
+        return;
+      }
+    }
+
     if (code === 'Escape') {
       if (this._mode !== 'none') {
         this.cancelMode();
@@ -1029,10 +1117,35 @@ export class SelectionController {
       return;
     }
 
+    if (ctrl && e.shiftKey && code === 'KeyA') {
+      consume();
+      this.selectAllCombat();
+      return;
+    }
+
     if (ctrl && code === 'KeyA') {
       consume();
       this.selectAllOnScreen();
       return;
+    }
+
+    // Phase 7: Komfort-Tasten (auch ohne Auswahl)
+    if (!ctrl && !e.altKey && !e.repeat) {
+      if (code === 'Period' || code === 'Comma') {
+        consume();
+        this.cycleIdle(code === 'Period' ? 1 : -1);
+        return;
+      }
+      if (code === 'Home' || code === 'Backspace') {
+        consume();
+        this.jumpToHq();
+        return;
+      }
+      if (code === 'Tab') {
+        consume();
+        this.cycleBases(e.shiftKey ? -1 : 1);
+        return;
+      }
     }
 
     if (ctrl || e.altKey || e.repeat) return;

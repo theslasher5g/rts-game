@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "geodata": "node scripts/build-geodata.mjs",
     "roads": "node scripts/build-roads.mjs",
-    "region": "node scripts/build-region.mjs"
+    "region": "node scripts/build-region.mjs",
+    "server": "node server/index.mjs",
+    "mp": "concurrently -k -n server,vite \"node server/index.mjs\" \"vite\""
   },
   "dependencies": {
     "@fontsource/share-tech-mono": "^5.3.0",

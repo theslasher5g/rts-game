@@ -20,6 +20,7 @@ import type { UnitManager } from '../units/UnitManager';
 import type { Cities } from '../world/Cities';
 import type { GeoData } from '../world/GeoData';
 import { distToPolyline, headingToDir, isBuildable, pointAlong, polylineLength, sampleLine } from './BuildTool';
+import { SCALE } from '../core/scale';
 
 // ------------------------------------------------------------------ Definitionen
 
@@ -369,11 +370,8 @@ const _c = new THREE.Color();
 const _cam = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
-const SCALE_K = 6;
-const SCALE_MIN = 2;
-const SCALE_MAX = 150;
-/** Ab diesem Kameraabstand (km) statt 3D-Teilen Symbole */
-const SYMBOL_DIST = 60;
+/** Ab diesem Kameraabstand (km) statt 3D-Teilen Symbole (Symbole haben konstante Pixelgröße) */
+const SYMBOL_DIST = 15;
 const SYMBOL_MAX_DIST = 4000;
 const MAX_INSTANCES = 120000;
 
@@ -419,7 +417,7 @@ export class StructureManager {
   private viewTimer = 0;
   private lastScale = 0;
   private lastExag = 0;
-  private visScale = SCALE_MIN;
+  private visScale = SCALE.structures;
   private camDist = 50;
 
   constructor(geo: GeoData, units: UnitManager, graph: NavGraph, cities: Cities, settings: Settings) {
@@ -1232,7 +1230,7 @@ export class StructureManager {
       if (this.mesh.count !== 0) { this.mesh.count = 0; this.viewDirty = true; }
       return;
     }
-    const s = Math.min(SCALE_MAX, Math.max(SCALE_MIN, SCALE_K * dist));
+    const s = SCALE.structures; // fester Maßstab, unabhängig vom Kameraabstand
     if (this.viewDirty || this.exag !== this.lastExag || Math.abs(s / this.lastScale - 1) > 0.05) {
       this.visScale = s;
       this.lastScale = s;

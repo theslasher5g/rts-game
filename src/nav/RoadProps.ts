@@ -3,7 +3,7 @@
  *
  * Alle Props sind Low-Poly-Teile mit Vertex-Farben (flach schattiert, Lambert + Fog + log. Tiefenpuffer über
  * onBeforeCompile). Position/Maßstab werden im Vertex-Shader gesetzt:
- *   Fußpunkt = Straßenmittelpunkt + Querversatz·S  (S = strategischer Maßstab, wächst mit dem Kameraabstand),
+ *   Fußpunkt = Straßenmittelpunkt + Querversatz·S  (S = SCALE.roadWidth, fest),
  *   Höhe = Gelände am Fußpunkt (GPU-Höhentextur, exakt wie Terrain; Überhöhung per Uniform → „re-drapen“ gratis),
  *   Größe = Modell·S, ab maxD ausgeblendet (S → 0).
  * Instanz-Attribute (8 Floats): aI0 = (x, z, yaw, Skala), aI1 = (offX, offZ, Tint, Geländehöhe km).

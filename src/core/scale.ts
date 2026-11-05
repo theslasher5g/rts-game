@@ -7,10 +7,10 @@
  * Ausblenden unterhalb der Pixelgrenze, NATO-Zeichen/Marker/Ringe/Balken mit konstanter Bildschirmgröße.
  */
 export const SCALE = {
-  /** Fahrzeuge, Luft- und Seefahrzeuge (× je Modell-`boost`, z. B. Schiffe 0.4): Panzer ~7 m -> ~50 m */
-  units: 6,
-  /** Infanterie (Soldat 1.8 m -> ~14 m); ersetzt den Modell-`boost` der Soldatenmodelle */
-  infantry: 7,
+  /** Fahrzeuge, Luft- und Seefahrzeuge (× je Modell-`boost`, z. B. Schiffe 0.4): Panzer ~7 m -> ~63 m */
+  units: 9,
+  /** Infanterie (Soldat 1.8 m -> ~16 m); ersetzt den Modell-`boost` der Soldatenmodelle */
+  infantry: 9,
   /** Gebäude/Städte/Dörfer: reale Größe */
   buildings: 1,
   /** Straßenmöblierung, Bäume, Bahn-/Straßenprops, Zäune */
@@ -18,15 +18,15 @@ export const SCALE = {
   /** Straßenmöblierung (Laternen, Schilder, Masten, Leitplanken): zwischen Props und Straßenbreite, damit sie neben dem Band nicht winzig wirken */
   roadProps: 2.2,
   /** Explosionen, Rauch, Mündungsfeuer, Krater: fester Multiplikator (Partikel-Exponent 0.85 im Shader) */
-  effects: 6,
+  effects: 8,
   /** Gräben, Sandsäcke, Bunker, Minenfelder … */
-  structures: 3,
+  structures: 5,
   /** Ölplattformen, Raffinerien, HQ, Kasernen: Landmarken, größer als real */
   bases: 2.5,
   /** Zivile Infrastruktur-Modelle (Masten, Tanks, Zivilfahrzeuge/Fußgänger an Straßen) */
-  infra: 3,
+  infra: 3.5,
   /** Fahrbahnbänder (Breite, Querversatz der Möblierung, Brückendeck) */
-  roadWidth: 3.5,
+  roadWidth: 4,
 } as const;
 
 /** Modellmaßstab einer Einheit: Soldaten -> SCALE.infantry, alle anderen -> SCALE.units × boost */

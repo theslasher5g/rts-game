@@ -659,13 +659,14 @@ export class Cities {
     if (country === 'VAL') style = 0;
     else if (country === 'KRN') style = 1;
     else if (country === 'MAR') style = 2;
+    else if (country === 'PAN') style = 1; // Pannonien: Plattenbau-/Ost-Stil mit warmen Dächern
     else if (EAST.has(country) || (country === 'DEU' && lon > 11.2 && lat > 50.4)) style = 1;
     else if (MED.has(country) || lat < 43.2) style = 2;
     else if (NORDIC.has(country) || lat > 58) style = 3;
     let styleBits = 0;
     const timberP = country === 'VAL' ? 0.32 : style === 0 ? 0.12 : 0;
     const wallOld = style === 2 ? WALL_MED : style === 3 ? WALL_NORDIC : WALL_WEST;
-    const roofOld = style === 2 ? ROOF_MED : style === 3 ? ROOF_NORDIC : ROOF_WEST;
+    const roofOld = style === 2 || country === 'PAN' ? ROOF_MED : style === 3 ? ROOF_NORDIC : ROOF_WEST;
     const theta = rnd() * Math.PI;
     const S = 0.2;
     const M = Math.ceil((R * 1.2) / S);

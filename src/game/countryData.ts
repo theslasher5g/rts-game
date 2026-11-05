@@ -1,5 +1,5 @@
 /**
- * Länderdaten des Szenarios "Operation Nordadria" (Phase 5): drei erfundene Nationen auf kleiner Karte.
+ * Länderdaten des Szenarios "Operation Nordadria" (Phase 5): vier erfundene Nationen auf kleiner Karte.
  * Wirtschaft = Öl (siehe src/logistics/types.ts); die klassischen Ressourcenblöcke bleiben nur als
  * Kompatibilitätsschicht (alle Werte klein bzw. 0), die HUD zeigt ausschließlich Öl.
  * Militärzahlen sind Theaterstärken (Dutzende Panzer, keine Tausende).
@@ -102,7 +102,7 @@ export const START_PROFILES: StartProfile[] = [
     production: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
     consumption: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
     allies: BUND_ALLIES('VAL'), tradePartners: [],
-    relations: { MAR: 80, KRN: -90 },
+    relations: { MAR: 80, KRN: -90, PAN: -40 },
     strengths: ['Ausgewogenes Heer mit guter Artillerie', 'Gebirgsriegel im Norden verkürzt die Front', 'Zwei Raffineriestraßen durch das Tal'],
     weaknesses: ['Ölfelder liegen weit von der Hauptstadt', 'Die Ebene im Osten ist offen', 'Wenige Pioniere für Brückenreparaturen'],
     difficulty: 'Mittel',
@@ -116,8 +116,8 @@ export const START_PROFILES: StartProfile[] = [
     stock: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
     production: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
     consumption: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
-    allies: [], tradePartners: [],
-    relations: { VAL: -90, MAR: -90 },
+    allies: ['PAN'], tradePartners: [],
+    relations: { VAL: -90, MAR: -90, PAN: 75 },
     strengths: ['Stärkste Panzerwaffe der Region', 'Eigene Ölfelder in der Ebene', 'Zentral geführt, schneller Aufmarsch'],
     weaknesses: ['Abhängig von wenigen Fernstraßen und Brücken', 'Kriegsmüde Bevölkerung', 'Kein Zugang zum Meer'],
     difficulty: 'Schwer',
@@ -132,11 +132,26 @@ export const START_PROFILES: StartProfile[] = [
     production: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
     consumption: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
     allies: BUND_ALLIES('MAR'), tradePartners: [],
-    relations: { VAL: 80, KRN: -90 },
+    relations: { VAL: 80, KRN: -90, PAN: -40 },
     strengths: ['Gut verteidigte Küste und Häfen', 'Kurze Wege zwischen Raffinerie und Hafen', 'Kleine, aber hoch motivierte Armee'],
-    weaknesses: ['Sehr wenig Land und Reserven', 'Nur ein Ölfeld im Kernland', 'Ohne Valdoria kaum zu halten'],
+    weaknesses: ['Sehr wenig Land und Reserven', 'Ein Ölfeld liegt direkt an der umkämpften Grenze', 'Ohne Valdoria kaum zu halten'],
     difficulty: 'Leicht',
     blurb: 'Kleines Küstenkönigreich im Süden. Wenig Truppen, aber kurze Wege und ein starker Hafen.',
+  },
+  {
+    a3: 'PAN', name: 'Großherzogtum Pannonien', short: 'Pannonien', capital: 'Pannburg', flag: '🟡', color: '#d3a13c',
+    government: 'Hybrid', bloc: 'PAKT', leaderTitle: 'Großherzog',
+    population: 5.0, gdp: 62, debtPct: 41, inflation: 4.8, zufriedenheit: 54,
+    militaryBudget: 1.7, manpower: 17, tanks: 26, ifv: 40, artillery: 18, aircraft: 6, helicopters: 5, ships: 0, drones: 12,
+    stock: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    production: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    consumption: rs([0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    allies: ['KRN'], tradePartners: [],
+    relations: { KRN: 75, VAL: -65, MAR: -65 },
+    strengths: ['Weite Ebene und ölreiches Tiefland', 'Schnelle Panzer- und Artillerieverbände', 'Starker Partner im Kronland-Pakt'],
+    weaknesses: ['Schwach im Gebirge', 'Kein Meereszugang, kaum Häfen', 'Offene Flanke zu Valdoria im Westen'],
+    difficulty: 'Mittel',
+    blurb: 'Flaches Großherzogtum im Norden. Ölreiche Ebene und bewegliche Verbände, aber ohne Küste und Gebirgsschutz.',
   },
 ];
 
@@ -179,4 +194,37 @@ export function getRelation(from: string, to: string): number {
   const ba = blocOf(from), bb = blocOf(to);
   if (ba === 'NEUTRAL' || bb === 'NEUTRAL') return 5;
   return ba === bb ? 45 : -45;
+}
+
+/**
+ * Diplomatische Grundhaltung je Spielmodus (veränderbar, da Profile statisch sind):
+ *  - 'campaign': Einzelspieler-Kampagne; Pannonien neutral (keine Bündnisse, kein Krieg), KRN gegen VAL+MAR.
+ *  - 'teams': 2 gegen 2 (VAL+MAR gegen KRN+PAN); auch Standard für Pannonien im freien Spiel.
+ *  - 'ffa': jeder gegen jeden, keine Bündnisse.
+ * Muss VOR dem Aufbau von HUD/Renderer/Fog (affiliation-Cache, allies) aufgerufen werden. Der tatsächliche Kriegszustand
+ * kommt aus War/scenario.ts, dies setzt nur Beziehungswerte, Bündnislisten und Blockzugehörigkeit.
+ */
+export type DiplomacyMode = 'campaign' | 'teams' | 'ffa';
+export function applyDiplomacyMode(mode: DiplomacyMode): void {
+  const set = (a3: string, allies: string[], bloc: Bloc, rel: Record<string, number>) => {
+    const p = BY_A3.get(a3);
+    if (!p) return;
+    p.allies = allies;
+    p.bloc = bloc;
+    p.relations = rel;
+  };
+  if (mode === 'teams') {
+    set('VAL', ['MAR'], 'BUND', { MAR: 80, KRN: -90, PAN: -65 });
+    set('MAR', ['VAL'], 'BUND', { VAL: 80, KRN: -90, PAN: -65 });
+    set('KRN', ['PAN'], 'PAKT', { VAL: -90, MAR: -90, PAN: 75 });
+    set('PAN', ['KRN'], 'PAKT', { KRN: 75, VAL: -65, MAR: -65 });
+  } else if (mode === 'ffa') {
+    const all = ['VAL', 'KRN', 'MAR', 'PAN'];
+    for (const a of all) set(a, [], 'NEUTRAL', Object.fromEntries(all.filter((b) => b !== a).map((b) => [b, -70])));
+  } else {
+    set('VAL', ['MAR'], 'BUND', { MAR: 80, KRN: -90, PAN: 5 });
+    set('MAR', ['VAL'], 'BUND', { VAL: 80, KRN: -90, PAN: 5 });
+    set('KRN', [], 'PAKT', { VAL: -90, MAR: -90, PAN: 10 });
+    set('PAN', [], 'NEUTRAL', { KRN: 10, VAL: 5, MAR: 5 });
+  }
 }

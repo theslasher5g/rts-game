@@ -117,7 +117,7 @@ export class UnitPanel {
     this.hint = el('div', 'up-hint');
     this.hint.append(
       el('span', 'up-hint-ic', '▸'),
-      el('span', '', 'Einheiten mit Linksklick oder Rahmen auswählen · Rechtsklick: Bewegen'),
+      el('span', '', 'Rechtsklick: Bewegen · . , untätige Einheiten · Pos1 HQ · Tab Basen · F1–F6 Fähigkeiten'),
     );
 
     // ---------- Hauptbereich (Auswahl vorhanden)
