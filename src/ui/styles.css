@@ -741,7 +741,7 @@ input[type='range']::-moz-range-thumb { width: 10px; height: 14px; background: v
   .evl { bottom: 278px !important; }
 }
 @media (max-height: 760px) {
-  .ms-panel { max-height: calc(100vh - 392px); display: flex; flex-direction: column; }
+  .ms-panel { max-height: calc(100vh - 400px); display: flex; flex-direction: column; }
   .ms-panel .ms-body { overflow-y: auto; min-height: 0; scrollbar-width: thin; }
 }
 
@@ -769,3 +769,17 @@ input[type='range']::-moz-range-thumb { width: 10px; height: 14px; background: v
 .chat-line b { font-weight: normal; color: var(--amber); }
 .chat-input { pointer-events: auto; width: 100%; margin-top: 3px; font: inherit; font-size: 12px; color: var(--amber-hi); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--amber); padding: 4px 8px; outline: none; user-select: text; }
 .chat-input.hidden { display: none; }
+
+/* QA-A: Reiter-Schublade (Produktion/Nachschub) liegt über der rechten Spalte: volle Höhe, scrollt, verdeckt keine Panels */
+.hud-drawer { top: 118px !important; bottom: 12px; transform: none !important; max-height: none !important; display: flex; flex-direction: column; }
+.hud-drawer .drawer-body { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.hud:has(.hud-drawer:not(.hidden)) ~ .evl,
+.hud:has(.hud-drawer:not(.hidden)) .hud-info,
+#ui:has(.hud-drawer:not(.hidden)) .hud-info,
+#ui:has(.hud-drawer:not(.hidden)) .evl,
+#ui:has(.hud-drawer:not(.hidden)) .net-panel,
+#ui:has(.hud-drawer:not(.hidden)) .cv-panel { display: none !important; }
+@media (max-width: 1100px) { .unit-panel { max-width: calc(100vw - 338px) !important; width: calc(100vw - 338px) !important; } }
+@media (max-width: 1100px) {
+  #ui:has(.hud-drawer:not(.hidden)) .unit-panel { right: 330px !important; width: auto !important; min-width: 0 !important; max-width: none !important; }
+}

@@ -6,7 +6,7 @@
 .ms-layer { z-index: 5; }
 .ms-panel {
   position: absolute;
-  top: var(--ms-top, 84px);
+  top: var(--ms-top, 92px);
   left: var(--ms-left, 8px);
   width: 286px;
   max-width: calc(100vw - 16px);

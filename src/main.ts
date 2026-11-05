@@ -76,18 +76,30 @@ async function boot() {
   const labelRoot = document.getElementById('labels') as HTMLElement;
 
   const settings: Settings = loadSettings();
+  // Ladebalken ehrlich halten: vor jedem schweren Aufbauschritt Beschriftung setzen und kurz dem Browser zum Zeichnen Zeit geben
+  const stage = (p: number, label: string): Promise<void> => {
+    setLoading(p, label);
+    return new Promise<void>((r) => {
+      const t = window.setTimeout(r, 60);
+      requestAnimationFrame(() => { window.clearTimeout(t); r(); });
+    });
+  };
   const geo = await GeoData.load(undefined, setLoading);
   setLoading(0.93, 'Lade Straßen- und Schienennetz…');
   const graph = await NavGraph.load(geo);
   const pathfinder = new Pathfinder(geo, graph);
 
   // --- Welt & Rendering
+  await stage(0.95, 'Baue Gelände und Gewässer…');
   const gfx = new GameRenderer(canvas, settings);
   const terrain = new Terrain(geo, settings);
   const water = new Water(geo, settings, terrain.heightTexture);
+  await stage(0.96, 'Erzeuge Städte und Straßenleben…');
   const cities = new Cities(geo, settings);
+  await stage(0.97, 'Pflanze Wälder und Dörfer…');
   const worldDetail = new WorldDetail(geo, settings, cities, graph);
   gfx.scene.add(worldDetail.object);
+  await stage(0.98, 'Verlege Straßen und Schienen…');
   const roads = new RoadRenderer(geo, graph, settings);
   gfx.scene.add(terrain.object, water.object, roads.object, cities.object);
 
@@ -97,6 +109,7 @@ async function boot() {
   const picker = new Picker(geo, settings);
 
   // --- Einheiten (Phase 2)
+  await stage(0.99, 'Bereite Einheiten und Zivilleben vor…');
   const units = new UnitManager(geo, pathfinder, settings);
   const unitRenderer = new UnitRenderer(units, geo, settings);
   gfx.scene.add(unitRenderer.object);
@@ -575,7 +588,7 @@ async function boot() {
   }
 
   // Debug-Zugriff in der Konsole
-  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, perf, perfOverlay, setQuality, Q, economy, supply, production, fog, missions, ais, abilities, abilityBar, eventLog, menu, getNet: () => net };
+  (window as unknown as { ww3: unknown }).ww3 = { geo, settings, terrain, rts, state, gfx, units, ctl, pathfinder, graph, war, combat, structures, cities, effects, cover, sfx, civil, reputation, occupation, worldDetail, perf, perfOverlay, setQuality, Q, bus, unitRenderer, roads, labels, minimap, tactics, civilPanel, hud, economy, supply, production, fog, missions, ais, abilities, abilityBar, eventLog, menu, getNet: () => net };
 }
 
 boot().catch((err: unknown) => {

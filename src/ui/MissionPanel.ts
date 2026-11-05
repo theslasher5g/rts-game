@@ -162,6 +162,9 @@ export class CampaignMenu {
     this.backdrop.appendChild(modal);
     this.backdrop.addEventListener('click', (e) => { if (e.target === this.backdrop) this.close(); });
     root.appendChild(this.backdrop);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isOpen) { e.preventDefault(); e.stopPropagation(); this.close(); }
+    }, true);
   }
 
   get isOpen(): boolean {

@@ -176,6 +176,11 @@ export class Tutorial {
     return false;
   }
 
+  private hasOwnStructure(): boolean {
+    for (const st of this.d.ctx.structures.structures.values()) if (st.owner === this.a3()) return true;
+    return false;
+  }
+
   private rememberSelectionPositions(): void {
     this.startPos.clear();
     for (const id of this.selected()) {
@@ -222,7 +227,8 @@ export class Tutorial {
       {
         id: 'build', target: '.up-cmd',
         text: 'Drücke C (Bauen) und platziere einen Graben oder Sandsäcke – oder sprenge (J) bzw. repariere (L) eine Brücke.',
-        poll: (t) => t.flags.has('structure'),
+        // Bauauftrag genügt (Fertigstellung dauert Spielzeit): Bauwerk des Spielers existiert
+        poll: (t) => t.flags.has('structure') || t.hasOwnStructure(),
       },
       {
         id: 'oil', manual: true, target: '.hud-oil',

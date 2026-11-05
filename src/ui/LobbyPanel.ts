@@ -218,6 +218,9 @@ export class LobbyPanel {
       });
     }
     root.appendChild(this.backdrop);
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isOpen) { e.preventDefault(); e.stopPropagation(); this.close(); }
+    }, true);
 
     // gespeicherte Werte
     this.nameInput.value = load(KEY_NAME) || '';
