@@ -7,7 +7,7 @@
  *      eigene LAEA-Projektion, Zentrum = Kartenmitte, Zellgröße 0,25 km.
  *   2. Hydrologie aus dem Höhenmodell: Senken füllen (Priority-Flood), D8-Abfluss, Akkumulation -> Flüsse (G=2),
  *      Senken -> Seen (G=1).
- *   3. Erfundene Länder (VAL/KRN/MAR aus src/game/scenario.ts) per gewichtetem Multi-Source-Dijkstra, dessen
+ *   3. Erfundene Länder (VAL/KRN/MAR/PAN aus src/game/scenario.ts, 4 Nationen) per gewichtetem Multi-Source-Dijkstra, dessen
  *      Schrittkosten an Steigungen und Flüssen steigen -> Grenzen folgen Kämmen und Flüssen.
  *   4. Erfundene Städte, Ölfelder, Dörfer-Knoten, HQ/Raffinerie/Startplatz.
  *   5. Straßen-/Schienennetz per Least-Cost-Pfad (Netz-Rabatt -> gemeinsame Trassen/Engpässe), Chaikin-Glättung,
