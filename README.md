@@ -126,6 +126,44 @@ anderen Weg, einen Krieg auszulösen.
 - **Brücken:** Pioniere legen Sprengladungen, ziehen sich zurück und sprengen. Die Kante im Wegenetz wird gesperrt, die
   Wegfindung weicht aus. Reparatur ist möglich.
 
+## Mehrspieler (Phase 7)
+
+**Aufbau:** Host-autoritativ. Ein Spieler (Host) rechnet die komplette Simulation im Browser, die anderen senden Befehle und
+bekommen Zustand und Ereignisse zurück. Ein kleiner Node-Server vermittelt nur Lobby und Nachrichten. Bis zu **4 Spieler**, vier
+Nationen: Valdoria, Kronland, Marenia, Pannonien. Modus **2 gegen 2** (Valdoria + Marenia gegen Kronland + Pannonien) oder
+**Jeder gegen jeden**. Nationen ohne Spieler führt auf Wunsch die KI; verlässt ein Gast das Spiel, übernimmt die KI seine Nation.
+
+**Starten (zwei Terminals):**
+
+```bash
+npm run server
+```
+
+```bash
+npm run dev
+```
+
+Beide Spieler öffnen die Adresse des Dev-Servers (die Lobby verbindet sich über `/ws` mit dem Server). Oder `npm run mp` startet beides.
+Für Freunde im Netz: `npm run build`, dann `npm run server` (liefert Spiel und Relay auf Port 8787), Adresse und Raumcode teilen.
+Ohne Server geht ein lokaler Test mit zwei Tabs im selben Browser („Lokaler Test“ in der Lobby).
+
+**Ablauf:** Hauptmenü → „Mehrspieler“ → Raum erstellen oder mit Code beitreten → Nation wählen → „Bereit“ → der Host startet.
+Im Spiel: Spielerliste mit Verbindungsanzeige, Chat mit Enter, nur der Host steuert Pause und Tempo.
+
+**Grenzschutz:** In den ersten 10 Minuten Echtzeit (freies Gefecht und Mehrspieler) sind die Grenzen gesperrt und es wird nicht gekämpft.
+Ein Banner zeigt den Countdown.
+
+## Was Phase 7 sonst enthält
+
+- **Fähigkeiten (F1–F6):** Aufklärungsflug, Nebelwand, Artilleriefeuer, Luftschlag, Versorgungsabwurf, Notreparatur. Kosten Fässer, haben
+  Abklingzeit; auf eigene oder verbündete Zivilgebiete gesperrt.
+- **Funkprotokoll** mit Sprung zur Karte, Pings auf der Minikarte, Fortschrittsbalken beim Einnehmen von Ölfeldern.
+- **Feste Größen:** Gebäude, Fahrzeuge und Objekte wachsen beim Zoomen nicht mehr mit.
+- **Qualitätsstufen** (niedrig, mittel, hoch) in den Einstellungen, FPS- und Leistungsanzeige mit Strg+Umschalt+P.
+- **Mehr Tasten:** `.` und `,` wechseln durch untätige Einheiten, Strg+Umschalt+A wählt alle Kampfeinheiten, Pos1 springt zum HQ, Tab durch
+  die Basen.
+- **Spielmechanik:** Fahrzeuge in Depots reparieren sich, Erfahrung verringert erlittenen Schaden, Produktion hat einen Sammelpunkt je Basis.
+
 ## Was Phase 6 enthält
 
 - **KI-Befehlshaber:** Kronland überfällt Tankwagen-Konvois, nimmt Ölfelder, sprengt Brücken auf deinen Versorgungsrouten, belagert Raffinerie
@@ -234,9 +272,9 @@ server-autoritativ (Multiplayer) angebunden werden können.
 4. ✅ Zivilisten und Schutzstatus
 5. ✅ Kleine Karte, Öl-Wirtschaft, Nachschub und Produktion
 6. ✅ Missionen, Kampagne, Anleitung, Nebel des Krieges, KI-Befehlshaber
-7. Spielbalance und Qualitätsstufen (Leistung), Zufallskarten, Speichern und Laden
+7. ✅ Mehrspieler (4er-Lobby), Fähigkeiten, Qualitätsstufen, Fehlerbehebung
 8. Wetter, Jahreszeiten und Tageszeit
-9. Multiplayer
+9. Zufallskarten, Speichern und Laden
 10. Forschung, Drohnen, Balancing, Feinschliff
 
 ## Datenquellen & Lizenzen
