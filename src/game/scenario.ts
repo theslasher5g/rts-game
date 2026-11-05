@@ -41,14 +41,39 @@ export const SCENARIO_REGION = {
 };
 
 export const SCENARIO_NATIONS: ScenarioNation[] = [
-  { a3: 'VAL', name: 'Republik Valdoria', short: 'Valdoria', color: '#4f7fbf', areaShare: 0.4, homeland: 'west', capital: 'Valdorn', playable: true },
-  { a3: 'KRN', name: 'Föderation Kronland', short: 'Kronland', color: '#bf4f4f', areaShare: 0.36, homeland: 'east', capital: 'Kronheim', playable: true },
-  { a3: 'MAR', name: 'Königreich Marenia', short: 'Marenia', color: '#5fa86a', areaShare: 0.24, homeland: 'south', capital: 'Marenburg', playable: true },
+  { a3: 'VAL', name: 'Republik Valdoria', short: 'Valdoria', color: '#4f7fbf', areaShare: 0.3, homeland: 'west', capital: 'Valdorn', playable: true },
+  { a3: 'KRN', name: 'Föderation Kronland', short: 'Kronland', color: '#bf4f4f', areaShare: 0.28, homeland: 'east', capital: 'Kronheim', playable: true },
+  { a3: 'MAR', name: 'Königreich Marenia', short: 'Marenia', color: '#5fa86a', areaShare: 0.22, homeland: 'south', capital: 'Marenburg', playable: true },
+  { a3: 'PAN', name: 'Großherzogtum Pannonien', short: 'Pannonien', color: '#d3a13c', areaShare: 0.2, homeland: 'north', capital: 'Pannburg', playable: true },
 ];
 
-/** Bündnislage zu Spielbeginn: Valdoria und Marenia verbündet, Kronland feindlich (Krieg bei Spielstart) */
+/**
+ * Bündnislage der KAMPAGNE (Einzelspieler): Valdoria und Marenia verbündet, Kronland führt Krieg gegen beide.
+ * Pannonien bleibt in der Kampagne neutral (nimmt nicht am Krieg teil), damit die Missionen unverändert gelten.
+ */
 export const SCENARIO_ALLIANCES: Array<[string, string]> = [['VAL', 'MAR']];
 export const SCENARIO_WARS: Array<[string, string]> = [['KRN', 'VAL'], ['KRN', 'MAR']];
+
+/**
+ * MEHRSPIELER (bis zu 4 Spieler): Standard 2 gegen 2 – Valdoria + Marenia gegen Kronland + Pannonien.
+ * Alternativ „Jeder gegen jeden“ (keine Bündnisse, jeder Krieg gegen jeden).
+ */
+export const MP_MAX_PLAYERS = 4;
+export type MpMode = 'teams' | 'ffa';
+export const MP_TEAMS: Array<[string, string]> = [['VAL', 'MAR'], ['KRN', 'PAN']];
+/** Kriegs- und Bündnispaare für einen Mehrspieler-Modus */
+export function mpDiplomacy(mode: MpMode): { alliances: Array<[string, string]>; wars: Array<[string, string]> } {
+  const all = ['VAL', 'KRN', 'MAR', 'PAN'];
+  const wars: Array<[string, string]> = [];
+  const alliances: Array<[string, string]> = [];
+  if (mode === 'teams') {
+    alliances.push(['VAL', 'MAR'], ['KRN', 'PAN']);
+    for (const a of ['VAL', 'MAR']) for (const b of ['KRN', 'PAN']) wars.push([a, b]);
+  } else {
+    for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) wars.push([all[i], all[j]]);
+  }
+  return { alliances, wars };
+}
 
 /**
  * Wirtschaft (ab Phase 5, Vorbild: Öl ist die einzige Währung): Ölfelder fördern, Tankwagen-Konvois liefern über das

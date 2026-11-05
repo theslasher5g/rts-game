@@ -31,6 +31,8 @@ export interface RoomInfo {
   seed: number;
   /** Nationen, die von der KI übernommen werden, wenn kein Spieler sie wählt */
   fillAI: boolean;
+  /** 'teams' = 2 gegen 2 (VAL+MAR vs KRN+PAN), 'ffa' = jeder gegen jeden */
+  mode: 'teams' | 'ffa';
   started: boolean;
   peers: PeerInfo[];
 }
@@ -86,7 +88,7 @@ export type ClientToServer =
   | { t: 'room:leave' }
   | { t: 'room:slot'; a3: string | null }
   | { t: 'room:ready'; ready: boolean }
-  | { t: 'room:config'; scenario?: string; seed?: number; fillAI?: boolean }
+  | { t: 'room:config'; scenario?: string; seed?: number; fillAI?: boolean; mode?: 'teams' | 'ffa' }
   | { t: 'room:start' }
   | { t: 'chat'; text: string }
   | { t: 'cmd'; method: string; args: unknown[] }
@@ -106,3 +108,5 @@ export type ServerToClient =
   | { t: 'pong'; ts: number };
 
 export const NET_PROTOCOL = 1;
+/** Lobby: bis zu 4 Spieler (siehe MP_MAX_PLAYERS in src/game/scenario.ts), 4 Nationen: VAL, KRN, MAR, PAN */
+export const MAX_PLAYERS = 4;
